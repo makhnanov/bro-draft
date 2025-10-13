@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import viteLogo from "/vite.svg";
 import tauriLogo from "/tauri.svg";
 import vueLogo from "./assets/vue.svg";
@@ -23,9 +24,19 @@ async function checkTemperature() {
     temperatureMsg.value = `Ошибка: ${error}`;
   }
 }
+
+async function closeApp() {
+  await getCurrentWindow().close();
+}
 </script>
 
 <template>
+  <button class="close-button" @click="closeApp">
+    <svg viewBox="0 0 24 24" class="close-icon">
+      <line x1="18" y1="6" x2="6" y2="18" stroke="white" stroke-width="2" stroke-linecap="round"/>
+      <line x1="6" y1="6" x2="18" y2="18" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </button>
   <main class="container">
     <h1>Welcome to Tauri + Vue</h1>
 
@@ -56,6 +67,40 @@ async function checkTemperature() {
 </template>
 
 <style scoped>
+.close-button {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  background-color: #dc3545;
+  border: none;
+  border-radius: 8px 8px 8px 0px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+  z-index: 1000;
+}
+
+.close-button:hover {
+  background-color: #c82333;
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.5);
+  transform: scale(1.05);
+}
+
+.close-button:active {
+  transform: scale(0.95);
+}
+
+.close-icon {
+  width: 20px;
+  height: 20px;
+}
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em #747bff);
 }
