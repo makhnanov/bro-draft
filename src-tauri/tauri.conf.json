@@ -19,11 +19,13 @@
       }
     ],
     "security": {
-      "csp": {
-        "default-src": "'self' 'unsafe-inline' 'unsafe-eval' data: http://localhost:* ws://localhost:*",
-        "img-src": "'self' data: http://localhost:* https:",
-        "connect-src": "'self' http://localhost:* ws://localhost:*"
-      }
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "plugins": {
+    "globalShortcut": {
+      "shortcuts": ["F12"]
     }
   },
   "bundle": {
