@@ -7,10 +7,21 @@ import vueLogo from "./assets/vue.svg";
 
 const greetMsg = ref("");
 const name = ref("");
+const temperatureMsg = ref("");
 
 async function greet() {
   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
   greetMsg.value = await invoke("greet", { name: name.value });
+}
+
+async function checkTemperature() {
+  try {
+    temperatureMsg.value = "Проверяю температуру...";
+    const result = await invoke("get_cpu_temperature") as string;
+    temperatureMsg.value = result;
+  } catch (error) {
+    temperatureMsg.value = `Ошибка: ${error}`;
+  }
 }
 </script>
 
@@ -36,6 +47,11 @@ async function greet() {
       <button type="submit">Greet</button>
     </form>
     <p>{{ greetMsg }}</p>
+
+    <div class="temperature-section">
+      <button @click="checkTemperature" class="brite-button">Brite</button>
+      <pre class="temperature-output">{{ temperatureMsg }}</pre>
+    </div>
   </main>
 </template>
 
@@ -46,6 +62,49 @@ async function greet() {
 
 .logo.vue:hover {
   filter: drop-shadow(0 0 2em #249b73);
+}
+
+.temperature-section {
+  margin-top: 2em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1em;
+}
+
+.brite-button {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+  padding: 0.8em 2em;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.brite-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+}
+
+.brite-button:active {
+  transform: translateY(0);
+}
+
+.temperature-output {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 1em;
+  border-radius: 8px;
+  min-width: 300px;
+  max-width: 500px;
+  text-align: left;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 </style>
@@ -157,6 +216,11 @@ button {
   }
   button:active {
     background-color: #0f0f0f69;
+  }
+
+  .temperature-output {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #f6f6f6;
   }
 }
 
