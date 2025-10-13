@@ -27,7 +27,7 @@
   },
   "plugins": {
     "globalShortcut": {
-      "shortcuts": ["F12", "F5"]
+      "shortcuts": ["F12", "F5", "F11"]
     }
   },
   "bundle": {

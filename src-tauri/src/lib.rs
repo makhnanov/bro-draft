@@ -101,6 +101,22 @@ pub fn run() {
                 }
             })?;
 
+            app.global_shortcut().on_shortcut("F11", |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    if let Some(window) = app.get_webview_window("main") {
+                        match window.is_fullscreen() {
+                            Ok(is_fullscreen) => {
+                                let _ = window.set_fullscreen(!is_fullscreen);
+                            }
+                            Err(_) => {
+                                // В случае ошибки просто выключаем fullscreen
+                                let _ = window.set_fullscreen(false);
+                            }
+                        }
+                    }
+                }
+            })?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![greet, get_cpu_temperature])
