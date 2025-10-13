@@ -1,2 +1,2 @@
 start-development:
-	pnpm tauri dev
+	pnpm build && pnpm tauri dev
