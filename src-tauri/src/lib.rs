@@ -52,17 +52,95 @@ fn get_cpu_temperature() -> Result<String, String> {
 async fn get_network_speed() -> Result<String, String> {
     use tokio::process::Command;
 
+    println!("=== Starting network speed test ===");
+
+    // Пробуем сначала официальный speedtest от Ookla
+    println!("Trying official speedtest from Ookla...");
+    let speedtest_result = Command::new("speedtest")
+        .arg("--simple")
+        .output()
+        .await;
+
+    match speedtest_result {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            println!("speedtest SUCCESS!");
+            println!("Status: {:?}", output.status);
+            println!("STDOUT length: {}", stdout.len());
+            println!("STDERR length: {}", stderr.len());
+            println!("STDOUT:\n{}", stdout);
+            println!("STDERR:\n{}", stderr);
+
+            // Возвращаем stdout, а если он пустой - stderr (некоторые программы выводят в stderr)
+            let result = if !stdout.is_empty() {
+                stdout
+            } else if !stderr.is_empty() {
+                stderr
+            } else {
+                "Тест выполнен, но результаты отсутствуют".to_string()
+            };
+
+            println!("Returning result length: {}", result.len());
+            return Ok(result);
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            println!("speedtest FAILED, trying speedtest-cli...");
+            println!("Status: {:?}", output.status);
+            println!("STDOUT: {}", stdout);
+            println!("STDERR: {}", stderr);
+            eprintln!("speedtest failed, trying speedtest-cli...");
+            eprintln!("STDERR: {}", stderr);
+        }
+        Err(e) => {
+            println!("speedtest NOT FOUND: {}", e);
+            println!("Trying speedtest-cli instead...");
+            eprintln!("speedtest not found ({}), trying speedtest-cli...", e);
+        }
+    }
+
+    // Если speedtest не сработал, пробуем speedtest-cli
+    println!("Trying speedtest-cli...");
     let output = Command::new("speedtest-cli")
         .arg("--simple")
         .output()
         .await
-        .map_err(|e| format!("Ошибка запуска speedtest-cli: {}", e))?;
+        .map_err(|e| {
+            let err_msg = format!("Ошибка запуска speedtest-cli: {}", e);
+            println!("ERROR: {}", err_msg);
+            eprintln!("ERROR: {}", err_msg);
+            err_msg
+        })?;
+
+    println!("speedtest-cli finished with status: {:?}", output.status);
 
     if !output.status.success() {
-        return Err("speedtest-cli завершился с ошибкой".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        println!("speedtest-cli FAILED!");
+        println!("Status: {:?}", output.status);
+        println!("STDOUT: {}", stdout);
+        println!("STDERR: {}", stderr);
+
+        eprintln!("speedtest-cli failed:");
+        eprintln!("Status: {:?}", output.status);
+        eprintln!("STDOUT: {}", stdout);
+        eprintln!("STDERR: {}", stderr);
+
+        return Err(format!(
+            "speedtest-cli завершился с ошибкой\nStatus: {:?}\nSTDOUT: {}\nSTDERR: {}\n\nПопробуйте установить официальный speedtest: https://www.speedtest.net/apps/cli",
+            output.status, stdout, stderr
+        ));
     }
 
     let result = String::from_utf8_lossy(&output.stdout).to_string();
+    println!("speedtest-cli SUCCESS!");
+    println!("OUTPUT:\n{}", result);
+    println!("=== Network speed test completed ===");
+
     Ok(result)
 }
 
