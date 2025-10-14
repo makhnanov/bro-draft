@@ -20,10 +20,16 @@ async function checkTemperature() {
     );
 
     if (dataLines.length > 0) {
-      // Показываем первую строку с температурой CPU
-      temperatureMsg.value = dataLines[0].trim();
+      // Извлекаем только температуру (число с °C)
+      const firstLine = dataLines[0].trim();
+      const tempMatch = firstLine.match(/(\d+\.?\d*)°C/);
+      if (tempMatch) {
+        temperatureMsg.value = `${tempMatch[1]}°C`;
+      } else {
+        temperatureMsg.value = firstLine;
+      }
     } else {
-      temperatureMsg.value = result; // Показываем весь результат если что-то пошло не так
+      temperatureMsg.value = result;
     }
   } catch (error) {
     temperatureMsg.value = `Ошибка: ${error}`;
