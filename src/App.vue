@@ -1,18 +1,56 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-const temperatureMsg = ref("");
+const temperature = ref(0);
 let intervalId: number | null = null;
+
+// Вычисляем процент для прогресс-бара (0-100°C -> 0-100%)
+const temperaturePercent = computed(() => {
+  const minTemp = 0;
+  const maxTemp = 100;
+  const percent = ((temperature.value - minTemp) / (maxTemp - minTemp)) * 100;
+  return Math.min(Math.max(percent, 0), 100);
+});
+
+// Вычисляем угол для SVG arc (спидометр от -135° до 135°, всего 270°)
+const arcPath = computed(() => {
+  const percent = temperaturePercent.value;
+  const startAngle = -135;
+  const endAngle = 135;
+  const angle = startAngle + (percent / 100) * (endAngle - startAngle);
+
+  const radius = 45;
+  const centerX = 60;
+  const centerY = 60;
+
+  const startRad = (startAngle * Math.PI) / 180;
+  const endRad = (angle * Math.PI) / 180;
+
+  const x1 = centerX + radius * Math.cos(startRad);
+  const y1 = centerY + radius * Math.sin(startRad);
+  const x2 = centerX + radius * Math.cos(endRad);
+  const y2 = centerY + radius * Math.sin(endRad);
+
+  const largeArc = angle - startAngle > 180 ? 1 : 0;
+
+  return `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}`;
+});
+
+// Цвет в зависимости от температуры
+const temperatureColor = computed(() => {
+  const temp = temperature.value;
+  if (temp < 50) return '#4ade80'; // зеленый
+  if (temp < 70) return '#facc15'; // желтый
+  if (temp < 85) return '#fb923c'; // оранжевый
+  return '#ef4444'; // красный
+});
 
 async function checkTemperature() {
   try {
     const result = await invoke("get_cpu_temperature") as string;
-    // Извлекаем все строки после заголовка
     const lines = result.split('\n').filter(line => line.trim() !== '');
-
-    // Убираем заголовок "Температура процессора:"
     const dataLines = lines.filter(line =>
       !line.includes('Температура процессора:') &&
       !line.includes('Не найдено') &&
@@ -20,19 +58,14 @@ async function checkTemperature() {
     );
 
     if (dataLines.length > 0) {
-      // Извлекаем только температуру (число с °C)
       const firstLine = dataLines[0].trim();
       const tempMatch = firstLine.match(/(\d+\.?\d*)°C/);
       if (tempMatch) {
-        temperatureMsg.value = `${tempMatch[1]}°C`;
-      } else {
-        temperatureMsg.value = firstLine;
+        temperature.value = parseFloat(tempMatch[1]);
       }
-    } else {
-      temperatureMsg.value = result;
     }
   } catch (error) {
-    temperatureMsg.value = `Ошибка: ${error}`;
+    console.error('Ошибка:', error);
   }
 }
 
@@ -41,14 +74,11 @@ async function closeApp() {
 }
 
 onMounted(() => {
-  // Запускаем сразу при загрузке
   checkTemperature();
-  // Обновляем каждую секунду
   intervalId = setInterval(checkTemperature, 1000);
 });
 
 onUnmounted(() => {
-  // Очищаем интервал при размонтировании компонента
   if (intervalId !== null) {
     clearInterval(intervalId);
   }
@@ -62,11 +92,40 @@ onUnmounted(() => {
       <line x1="6" y1="6" x2="18" y2="18" stroke="white" stroke-width="2" stroke-linecap="round"/>
     </svg>
   </button>
-  <main class="container">
-    <div class="temperature-section">
-      <pre class="temperature-output">{{ temperatureMsg }}</pre>
-    </div>
-  </main>
+
+  <div class="speedometer-container">
+    <svg viewBox="0 0 120 120" class="speedometer">
+      <!-- Фоновая дуга (серая) -->
+      <path
+        d="M 18.18 91.82 A 45 45 0 1 1 101.82 91.82"
+        fill="none"
+        stroke="rgba(128, 128, 128, 0.2)"
+        stroke-width="8"
+        stroke-linecap="round"
+      />
+
+      <!-- Прогресс дуга (цветная) -->
+      <path
+        :d="arcPath"
+        fill="none"
+        :stroke="temperatureColor"
+        stroke-width="8"
+        stroke-linecap="round"
+        class="progress-arc"
+      />
+
+      <!-- Температура в центре -->
+      <text
+        x="60"
+        y="65"
+        text-anchor="middle"
+        class="temperature-text"
+        :fill="temperatureColor"
+      >
+        {{ temperature.toFixed(1) }}°
+      </text>
+    </svg>
+  </div>
 </template>
 
 <style scoped>
@@ -104,25 +163,30 @@ onUnmounted(() => {
   height: 20px;
 }
 
-.temperature-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+.speedometer-container {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  width: 120px;
+  height: 120px;
+  z-index: 999;
 }
 
-.temperature-output {
-  background-color: rgba(0, 0, 0, 0.05);
-  padding: 2em;
-  border-radius: 12px;
-  min-width: 400px;
-  text-align: center;
-  font-family: 'Courier New', monospace;
-  font-size: 1.2em;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+.speedometer {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.15));
+}
+
+.progress-arc {
+  transition: stroke 0.3s ease;
+}
+
+.temperature-text {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: 'Inter', 'Arial', sans-serif;
+  transition: fill 0.3s ease;
 }
 
 </style>
@@ -136,8 +200,6 @@ onUnmounted(() => {
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
   color: #0f0f0f;
   background-color: #f6f6f6;
   font-synthesis: none;
@@ -145,7 +207,6 @@ onUnmounted(() => {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
-  overflow: hidden;
 }
 
 html, body {
@@ -154,28 +215,10 @@ html, body {
   overflow: hidden;
 }
 
-.container {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  overflow: hidden;
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;
     background-color: #2f2f2f;
-  }
-
-  .temperature-output {
-    background-color: rgba(255, 255, 255, 0.05);
-    color: #f6f6f6;
   }
 }
 </style>
