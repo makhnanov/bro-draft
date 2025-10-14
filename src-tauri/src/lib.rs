@@ -48,6 +48,23 @@ fn get_cpu_temperature() -> Result<String, String> {
     Ok(result)
 }
 
+#[tauri::command]
+fn get_network_speed() -> Result<String, String> {
+    use std::process::Command;
+
+    let output = Command::new("speedtest-cli")
+        .arg("--simple")
+        .output()
+        .map_err(|e| format!("Ошибка запуска speedtest-cli: {}", e))?;
+
+    if !output.status.success() {
+        return Err("speedtest-cli завершился с ошибкой".to_string());
+    }
+
+    let result = String::from_utf8_lossy(&output.stdout).to_string();
+    Ok(result)
+}
+
 // Wait for dev server to be ready
 fn wait_for_dev_server(url: &str, max_attempts: u32) -> bool {
     for attempt in 1..=max_attempts {
@@ -119,7 +136,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, get_cpu_temperature])
+        .invoke_handler(tauri::generate_handler![greet, get_cpu_temperature, get_network_speed])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
