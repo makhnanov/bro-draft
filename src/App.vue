@@ -1,25 +1,30 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import viteLogo from "/vite.svg";
-import tauriLogo from "/tauri.svg";
-import vueLogo from "./assets/vue.svg";
 
-const greetMsg = ref("");
-const name = ref("");
 const temperatureMsg = ref("");
-
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
-}
+let intervalId: number | null = null;
 
 async function checkTemperature() {
   try {
-    temperatureMsg.value = "Проверяю температуру...";
     const result = await invoke("get_cpu_temperature") as string;
-    temperatureMsg.value = result;
+    // Извлекаем все строки после заголовка
+    const lines = result.split('\n').filter(line => line.trim() !== '');
+
+    // Убираем заголовок "Температура процессора:"
+    const dataLines = lines.filter(line =>
+      !line.includes('Температура процессора:') &&
+      !line.includes('Не найдено') &&
+      !line.includes('Доступные датчики:')
+    );
+
+    if (dataLines.length > 0) {
+      // Показываем первую строку с температурой CPU
+      temperatureMsg.value = dataLines[0].trim();
+    } else {
+      temperatureMsg.value = result; // Показываем весь результат если что-то пошло не так
+    }
   } catch (error) {
     temperatureMsg.value = `Ошибка: ${error}`;
   }
@@ -28,6 +33,20 @@ async function checkTemperature() {
 async function closeApp() {
   await getCurrentWindow().close();
 }
+
+onMounted(() => {
+  // Запускаем сразу при загрузке
+  checkTemperature();
+  // Обновляем каждую секунду
+  intervalId = setInterval(checkTemperature, 1000);
+});
+
+onUnmounted(() => {
+  // Очищаем интервал при размонтировании компонента
+  if (intervalId !== null) {
+    clearInterval(intervalId);
+  }
+});
 </script>
 
 <template>
@@ -38,29 +57,7 @@ async function closeApp() {
     </svg>
   </button>
   <main class="container">
-    <h1>Welcome to Tauri + Vue</h1>
-
-    <div class="row">
-      <a href="https://vitejs.dev" target="_blank">
-        <img :src="viteLogo" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img :src="tauriLogo" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img :src="vueLogo" class="logo vue" alt="Vue logo" />
-      </a>
-    </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
-
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
-
     <div class="temperature-section">
-      <button @click="checkTemperature" class="brite-button">Brite</button>
       <pre class="temperature-output">{{ temperatureMsg }}</pre>
     </div>
   </main>
@@ -101,55 +98,26 @@ async function closeApp() {
   height: 20px;
 }
 
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
-}
-
 .temperature-section {
-  margin-top: 2em;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1em;
-}
-
-.brite-button {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  font-weight: 600;
-  padding: 0.8em 2em;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-}
-
-.brite-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-}
-
-.brite-button:active {
-  transform: translateY(0);
+  justify-content: center;
+  min-height: 100vh;
 }
 
 .temperature-output {
   background-color: rgba(0, 0, 0, 0.05);
-  padding: 1em;
-  border-radius: 8px;
-  min-width: 300px;
-  max-width: 500px;
-  text-align: left;
+  padding: 2em;
+  border-radius: 12px;
+  min-width: 400px;
+  text-align: center;
   font-family: 'Courier New', monospace;
-  font-size: 0.9em;
+  font-size: 1.2em;
   line-height: 1.6;
   white-space: pre-wrap;
   word-wrap: break-word;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
 </style>
@@ -159,10 +127,8 @@ async function closeApp() {
   font-size: 16px;
   line-height: 24px;
   font-weight: 400;
-
   color: #0f0f0f;
   background-color: #f6f6f6;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -172,76 +138,11 @@ async function closeApp() {
 
 .container {
   margin: 0;
-  padding-top: 10vh;
+  padding: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
   text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -250,23 +151,9 @@ button {
     background-color: #2f2f2f;
   }
 
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-
   .temperature-output {
     background-color: rgba(255, 255, 255, 0.05);
     color: #f6f6f6;
   }
 }
-
 </style>
