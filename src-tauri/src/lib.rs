@@ -2,6 +2,43 @@ use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use std::time::Duration;
 use sysinfo::Components;
+use std::fs;
+use std::path::PathBuf;
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize, Default)]
+struct AppState {
+    devtools_open: bool,
+}
+
+fn get_config_path() -> Option<PathBuf> {
+    if let Some(proj_dirs) = directories::ProjectDirs::from("com", "bro", "bro") {
+        let config_dir = proj_dirs.config_dir();
+        fs::create_dir_all(config_dir).ok()?;
+        Some(config_dir.join("state.json"))
+    } else {
+        None
+    }
+}
+
+fn load_state() -> AppState {
+    if let Some(config_path) = get_config_path() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(state) = serde_json::from_str(&content) {
+                return state;
+            }
+        }
+    }
+    AppState::default()
+}
+
+fn save_state(state: &AppState) {
+    if let Some(config_path) = get_config_path() {
+        if let Ok(content) = serde_json::to_string_pretty(state) {
+            let _ = fs::write(config_path, content);
+        }
+    }
+}
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -180,11 +217,16 @@ pub fn run() {
             app.global_shortcut().on_shortcut("F12", |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
                     if let Some(window) = app.get_webview_window("main") {
-                        if window.is_devtools_open() {
+                        let is_open = window.is_devtools_open();
+                        if is_open {
                             let _ = window.close_devtools();
                         } else {
                             let _ = window.open_devtools();
                         }
+                        // Сохраняем новое состояние
+                        save_state(&AppState {
+                            devtools_open: !is_open,
+                        });
                     }
                 }
             })?;
@@ -213,10 +255,15 @@ pub fn run() {
                 }
             })?;
 
-            // Открываем DevTools при запуске
-            #[cfg(debug_assertions)]
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.open_devtools();
+            // Восстанавливаем состояние DevTools
+            let saved_state = load_state();
+            println!("Loaded state: devtools_open = {}", saved_state.devtools_open);
+
+            if saved_state.devtools_open {
+                if let Some(window) = app.get_webview_window("main") {
+                    println!("Opening DevTools on startup...");
+                    let _ = window.open_devtools();
+                }
             }
 
             Ok(())
