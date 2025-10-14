@@ -134,6 +134,12 @@ pub fn run() {
                 }
             })?;
 
+            // Открываем DevTools при запуске
+            #[cfg(debug_assertions)]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.open_devtools();
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![greet, get_cpu_temperature, get_network_speed])

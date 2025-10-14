@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 const temperature = ref(0);
 const downloadSpeed = ref(0);
 const uploadSpeed = ref(0);
+const isSpeedTestError = ref(false);
 let tempIntervalId: number | null = null;
 let speedIntervalId: number | null = null;
 
@@ -64,9 +65,9 @@ const temperatureColor = computed(() => {
   return '#ef4444'; // красный
 });
 
-// Цвет для скорости (одинаковый для обоих)
+// Цвет для скорости (синий если ок, красный если ошибка)
 const speedColor = computed(() => {
-  return '#3b82f6'; // синий
+  return isSpeedTestError.value ? '#ef4444' : '#3b82f6'; // красный или синий
 });
 
 async function checkTemperature() {
@@ -102,14 +103,20 @@ async function checkNetworkSpeed() {
     const downloadMatch = result.match(/Download:\s+(\d+\.?\d*)\s+Mbit\/s/);
     const uploadMatch = result.match(/Upload:\s+(\d+\.?\d*)\s+Mbit\/s/);
 
-    if (downloadMatch) {
+    if (downloadMatch && uploadMatch) {
       downloadSpeed.value = parseFloat(downloadMatch[1]);
-    }
-    if (uploadMatch) {
       uploadSpeed.value = parseFloat(uploadMatch[1]);
+      isSpeedTestError.value = false;
+    } else {
+      downloadSpeed.value = 0;
+      uploadSpeed.value = 0;
+      isSpeedTestError.value = true;
     }
   } catch (error) {
     console.error('Ошибка speedtest:', error);
+    downloadSpeed.value = 0;
+    uploadSpeed.value = 0;
+    isSpeedTestError.value = true;
   }
 }
 
