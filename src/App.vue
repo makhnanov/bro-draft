@@ -14,28 +14,12 @@ const temperaturePercent = computed(() => {
   return Math.min(Math.max(percent, 0), 100);
 });
 
-// Вычисляем угол для SVG arc (спидометр от -135° до 135°, всего 270°)
-const arcPath = computed(() => {
-  const percent = temperaturePercent.value;
-  const startAngle = -135;
-  const endAngle = 135;
-  const angle = startAngle + (percent / 100) * (endAngle - startAngle);
-
+// Вычисляем progress для stroke-dasharray
+const dashProgress = computed(() => {
   const radius = 45;
-  const centerX = 60;
-  const centerY = 60;
-
-  const startRad = (startAngle * Math.PI) / 180;
-  const endRad = (angle * Math.PI) / 180;
-
-  const x1 = centerX + radius * Math.cos(startRad);
-  const y1 = centerY + radius * Math.sin(startRad);
-  const x2 = centerX + radius * Math.cos(endRad);
-  const y2 = centerY + radius * Math.sin(endRad);
-
-  const largeArc = angle - startAngle > 180 ? 1 : 0;
-
-  return `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}`;
+  const circumference = Math.PI * radius; // Половина окружности
+  const progress = (temperaturePercent.value / 100) * circumference;
+  return { progress, circumference };
 });
 
 // Цвет в зависимости от температуры
@@ -94,30 +78,31 @@ onUnmounted(() => {
   </button>
 
   <div class="speedometer-container">
-    <svg viewBox="0 0 120 120" class="speedometer">
+    <svg viewBox="0 0 120 80" class="speedometer">
       <!-- Фоновая дуга (серая) -->
       <path
-        d="M 18.18 91.82 A 45 45 0 1 1 101.82 91.82"
+        d="M 15 70 A 45 45 0 0 1 105 70"
         fill="none"
         stroke="rgba(128, 128, 128, 0.2)"
-        stroke-width="8"
+        stroke-width="10"
         stroke-linecap="round"
       />
 
       <!-- Прогресс дуга (цветная) -->
       <path
-        :d="arcPath"
+        d="M 15 70 A 45 45 0 0 1 105 70"
         fill="none"
         :stroke="temperatureColor"
-        stroke-width="8"
+        stroke-width="10"
         stroke-linecap="round"
         class="progress-arc"
+        :stroke-dasharray="`${dashProgress.progress} ${dashProgress.circumference}`"
       />
 
       <!-- Температура в центре -->
       <text
         x="60"
-        y="65"
+        y="62"
         text-anchor="middle"
         class="temperature-text"
         :fill="temperatureColor"
@@ -167,8 +152,8 @@ onUnmounted(() => {
   position: fixed;
   top: 16px;
   left: 16px;
-  width: 120px;
-  height: 120px;
+  width: 100px;
+  height: 70px;
   z-index: 999;
 }
 
@@ -179,7 +164,7 @@ onUnmounted(() => {
 }
 
 .progress-arc {
-  transition: stroke 0.3s ease;
+  transition: stroke 0.3s ease, stroke-dasharray 0.3s ease;
 }
 
 .temperature-text {
