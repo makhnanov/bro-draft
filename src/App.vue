@@ -125,12 +125,15 @@ async function closeApp() {
 }
 
 onMounted(() => {
+  // Запускаем температуру сразу
   checkTemperature();
   tempIntervalId = setInterval(checkTemperature, 1000);
 
-  // Запускаем speedtest сразу и каждые 30 секунд
-  checkNetworkSpeed();
-  speedIntervalId = setInterval(checkNetworkSpeed, 30000);
+  // Запускаем speedtest с задержкой 2 секунды, чтобы UI успел загрузиться
+  setTimeout(() => {
+    checkNetworkSpeed();
+    speedIntervalId = setInterval(checkNetworkSpeed, 30000);
+  }, 2000);
 });
 
 onUnmounted(() => {

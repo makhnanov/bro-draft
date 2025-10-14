@@ -1,7 +1,7 @@
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use std::time::Duration;
-use sysinfo::{System, Components};
+use sysinfo::Components;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -49,12 +49,13 @@ fn get_cpu_temperature() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_network_speed() -> Result<String, String> {
-    use std::process::Command;
+async fn get_network_speed() -> Result<String, String> {
+    use tokio::process::Command;
 
     let output = Command::new("speedtest-cli")
         .arg("--simple")
         .output()
+        .await
         .map_err(|e| format!("Ошибка запуска speedtest-cli: {}", e))?;
 
     if !output.status.success() {
