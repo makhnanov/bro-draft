@@ -109,7 +109,6 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
 }
 
 .temperature-output {
@@ -128,6 +127,12 @@ onUnmounted(() => {
 
 </style>
 <style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -140,15 +145,26 @@ onUnmounted(() => {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+  overflow: hidden;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 .container {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
   text-align: center;
+  overflow: hidden;
 }
 
 @media (prefers-color-scheme: dark) {
