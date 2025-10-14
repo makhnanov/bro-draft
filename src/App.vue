@@ -7,8 +7,10 @@ const temperature = ref(0);
 const downloadSpeed = ref(0);
 const uploadSpeed = ref(0);
 const isSpeedTestError = ref(false);
+const currentTime = ref('');
 let tempIntervalId: number | null = null;
 let speedIntervalId: number | null = null;
+let timeIntervalId: number | null = null;
 
 // Вычисляем процент для прогресс-бара температуры (0-100°C -> 0-100%)
 const temperaturePercent = computed(() => {
@@ -120,11 +122,23 @@ async function checkNetworkSpeed() {
   }
 }
 
+function updateTime() {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  currentTime.value = `${hours}:${minutes}:${seconds}`;
+}
+
 async function closeApp() {
   await getCurrentWindow().close();
 }
 
 onMounted(() => {
+  // Запускаем время сразу
+  updateTime();
+  timeIntervalId = setInterval(updateTime, 1000);
+
   // Запускаем температуру сразу
   checkTemperature();
   tempIntervalId = setInterval(checkTemperature, 1000);
@@ -137,6 +151,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (timeIntervalId !== null) {
+    clearInterval(timeIntervalId);
+  }
   if (tempIntervalId !== null) {
     clearInterval(tempIntervalId);
   }
@@ -147,6 +164,11 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- Часы сверху посередине -->
+  <div class="clock">
+    {{ currentTime }}
+  </div>
+
   <button class="close-button" @click="closeApp">
     <svg viewBox="0 0 24 24" class="close-icon">
       <line x1="18" y1="6" x2="6" y2="18" stroke="white" stroke-width="2" stroke-linecap="round"/>
@@ -267,6 +289,20 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.clock {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 48px;
+  font-weight: 700;
+  font-family: 'Inter', 'Arial', sans-serif;
+  color: #ffffff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  letter-spacing: 2px;
+}
+
 .close-button {
   position: fixed;
   top: 16px;
