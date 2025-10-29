@@ -8,9 +8,14 @@ const downloadSpeed = ref(0);
 const uploadSpeed = ref(0);
 const isSpeedTestError = ref(false);
 const currentTime = ref('');
+const isSidebarCollapsed = ref(false);
 let tempIntervalId: number | null = null;
 let speedIntervalId: number | null = null;
 let timeIntervalId: number | null = null;
+
+function toggleSidebar() {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value;
+}
 
 // Вычисляем процент для прогресс-бара температуры (0-100°C -> 0-100%)
 const temperaturePercent = computed(() => {
@@ -124,7 +129,7 @@ async function checkNetworkSpeed() {
 
 function updateTime() {
   const now = new Date();
-  const hours = String(now.getHours()).padStart(2, '0');
+  const hours = String((now.getHours() - 1 + 24) % 24).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   const seconds = String(now.getSeconds()).padStart(2, '0');
   currentTime.value = `${hours}:${minutes}:${seconds}`;
@@ -164,6 +169,59 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- Боковое меню в стиле JIRA -->
+  <div :class="['sidebar', { collapsed: isSidebarCollapsed }]">
+    <button class="sidebar-toggle" @click="toggleSidebar">
+      <svg viewBox="0 0 24 24" class="toggle-icon">
+        <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="3" y1="6" x2="21" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="3" y1="18" x2="21" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="12" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <span class="nav-text">Aliases</span>
+      </a>
+      <a href="#" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <span class="nav-text">Recognition</span>
+      </a>
+      <a href="#" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/>
+          <polyline points="12 6 12 12 16 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="nav-text">Watcher</span>
+      </a>
+      <a href="#" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <polyline points="16 3 21 3 21 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <polyline points="8 21 3 21 3 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="21" y1="3" x2="14" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="3" y1="21" x2="10" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="nav-text">Converters</span>
+      </a>
+      <a href="#" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <rect x="2" y="6" width="20" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12 12h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M17 12h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M7 12h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="nav-text">Automatization</span>
+      </a>
+    </nav>
+  </div>
+
   <!-- Часы сверху посередине -->
   <div class="clock">
     {{ currentTime }}
@@ -176,119 +234,225 @@ onUnmounted(() => {
     </svg>
   </button>
 
-  <!-- Спидометр температуры CPU -->
-  <div class="speedometer-container temp-speedometer">
-    <svg viewBox="0 0 120 80" class="speedometer">
-      <path
-        d="M 15 70 A 45 45 0 0 1 105 70"
-        fill="none"
-        stroke="rgba(128, 128, 128, 0.2)"
-        stroke-width="10"
-        stroke-linecap="round"
-      />
-      <path
-        d="M 15 70 A 45 45 0 0 1 105 70"
-        fill="none"
-        :stroke="temperatureColor"
-        stroke-width="10"
-        stroke-linecap="round"
-        class="progress-arc"
-        :stroke-dasharray="`${tempDashProgress.progress} ${tempDashProgress.circumference}`"
-      />
-      <text
-        x="60"
-        y="62"
-        text-anchor="middle"
-        class="temperature-text"
-        :fill="temperatureColor"
-      >
-        {{ temperature.toFixed(1) }}°
-      </text>
-    </svg>
-  </div>
+<!-- Speedometers-->
+  <div style="margin-left: 250px;">
+    <!-- Спидометр температуры CPU -->
+    <div class="speedometer-container temp-speedometer">
+      <svg viewBox="0 0 120 80" class="speedometer">
+        <path
+          d="M 15 70 A 45 45 0 0 1 105 70"
+          fill="none"
+          stroke="rgba(128, 128, 128, 0.2)"
+          stroke-width="10"
+          stroke-linecap="round"
+        />
+        <path
+          d="M 15 70 A 45 45 0 0 1 105 70"
+          fill="none"
+          :stroke="temperatureColor"
+          stroke-width="10"
+          stroke-linecap="round"
+          class="progress-arc"
+          :stroke-dasharray="`${tempDashProgress.progress} ${tempDashProgress.circumference}`"
+        />
+        <text
+          x="60"
+          y="62"
+          text-anchor="middle"
+          class="temperature-text"
+          :fill="temperatureColor"
+        >
+          {{ temperature.toFixed(1) }}°
+        </text>
+      </svg>
+    </div>
 
-  <!-- Спидометр Download -->
-  <div class="speedometer-container download-speedometer">
-    <svg viewBox="0 0 120 80" class="speedometer">
-      <path
-        d="M 15 70 A 45 45 0 0 1 105 70"
-        fill="none"
-        stroke="rgba(128, 128, 128, 0.2)"
-        stroke-width="10"
-        stroke-linecap="round"
-      />
-      <path
-        d="M 15 70 A 45 45 0 0 1 105 70"
-        fill="none"
-        :stroke="speedColor"
-        stroke-width="10"
-        stroke-linecap="round"
-        class="progress-arc"
-        :stroke-dasharray="`${downloadDashProgress.progress} ${downloadDashProgress.circumference}`"
-      />
-      <text
-        x="60"
-        y="62"
-        text-anchor="middle"
-        class="speed-text"
-        :fill="speedColor"
-      >
-        {{ downloadSpeed.toFixed(0) }}
-      </text>
-      <text
-        x="60"
-        y="76"
-        text-anchor="middle"
-        class="label-text"
-        fill="#888"
-      >
-        ↓
-      </text>
-    </svg>
-  </div>
+    <!-- Спидометр Download -->
+    <div class="speedometer-container download-speedometer">
+      <svg viewBox="0 0 120 80" class="speedometer">
+        <path
+          d="M 15 70 A 45 45 0 0 1 105 70"
+          fill="none"
+          stroke="rgba(128, 128, 128, 0.2)"
+          stroke-width="10"
+          stroke-linecap="round"
+        />
+        <path
+          d="M 15 70 A 45 45 0 0 1 105 70"
+          fill="none"
+          :stroke="speedColor"
+          stroke-width="10"
+          stroke-linecap="round"
+          class="progress-arc"
+          :stroke-dasharray="`${downloadDashProgress.progress} ${downloadDashProgress.circumference}`"
+        />
+        <text
+          x="60"
+          y="62"
+          text-anchor="middle"
+          class="speed-text"
+          :fill="speedColor"
+        >
+          {{ downloadSpeed.toFixed(0) }}
+        </text>
+        <text
+          x="60"
+          y="76"
+          text-anchor="middle"
+          class="label-text"
+          fill="#888"
+        >
+          ↓
+        </text>
+      </svg>
+    </div>
 
-  <!-- Спидометр Upload -->
-  <div class="speedometer-container upload-speedometer">
-    <svg viewBox="0 0 120 80" class="speedometer">
-      <path
-        d="M 15 70 A 45 45 0 0 1 105 70"
-        fill="none"
-        stroke="rgba(128, 128, 128, 0.2)"
-        stroke-width="10"
-        stroke-linecap="round"
-      />
-      <path
-        d="M 15 70 A 45 45 0 0 1 105 70"
-        fill="none"
-        :stroke="speedColor"
-        stroke-width="10"
-        stroke-linecap="round"
-        class="progress-arc"
-        :stroke-dasharray="`${uploadDashProgress.progress} ${uploadDashProgress.circumference}`"
-      />
-      <text
-        x="60"
-        y="62"
-        text-anchor="middle"
-        class="speed-text"
-        :fill="speedColor"
-      >
-        {{ uploadSpeed.toFixed(0) }}
-      </text>
-      <text
-        x="60"
-        y="76"
-        text-anchor="middle"
-        class="label-text"
-        fill="#888"
-      >
-        ↑
-      </text>
-    </svg>
+    <!-- Спидометр Upload -->
+    <div class="speedometer-container upload-speedometer">
+      <svg viewBox="0 0 120 80" class="speedometer">
+        <path
+          d="M 15 70 A 45 45 0 0 1 105 70"
+          fill="none"
+          stroke="rgba(128, 128, 128, 0.2)"
+          stroke-width="10"
+          stroke-linecap="round"
+        />
+        <path
+          d="M 15 70 A 45 45 0 0 1 105 70"
+          fill="none"
+          :stroke="speedColor"
+          stroke-width="10"
+          stroke-linecap="round"
+          class="progress-arc"
+          :stroke-dasharray="`${uploadDashProgress.progress} ${uploadDashProgress.circumference}`"
+        />
+        <text
+          x="60"
+          y="62"
+          text-anchor="middle"
+          class="speed-text"
+          :fill="speedColor"
+        >
+          {{ uploadSpeed.toFixed(0) }}
+        </text>
+        <text
+          x="60"
+          y="76"
+          text-anchor="middle"
+          class="label-text"
+          fill="#888"
+        >
+          ↑
+        </text>
+      </svg>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* Боковое меню в стиле JIRA */
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 240px;
+  background: linear-gradient(180deg, #0747a6 0%, #0052cc 100%);
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  transition: width 0.3s ease;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar.collapsed {
+  width: 64px;
+}
+
+.sidebar-toggle {
+  width: 100%;
+  height: 64px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  transition: background-color 0.2s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.toggle-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 16px 0;
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  position: relative;
+  white-space: nowrap;
+}
+
+.nav-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.nav-item.active {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: #ffffff;
+}
+
+.nav-icon {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  margin-right: 12px;
+}
+
+.sidebar.collapsed .nav-icon {
+  margin-right: 0;
+}
+
+.nav-text {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.sidebar.collapsed .nav-text {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+}
+
 .clock {
   position: fixed;
   top: 16px;
@@ -301,6 +465,11 @@ onUnmounted(() => {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   z-index: 1000;
   letter-spacing: 2px;
+  background-color: rgba(60, 60, 60, 0.85);
+  padding: 12px 32px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 .close-button {
@@ -338,7 +507,6 @@ onUnmounted(() => {
 }
 
 .speedometer-container {
-  position: fixed;
   width: 100px;
   height: 70px;
   z-index: 999;
