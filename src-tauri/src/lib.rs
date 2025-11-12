@@ -271,6 +271,81 @@ pub fn run() {
                 }
             })?;
 
+            app.global_shortcut().on_shortcut("CommandOrControl+Shift+C", |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    if let Some(window) = app.get_webview_window("main") {
+                        println!("Opening DevTools with inspector mode...");
+
+                        // Проверяем, открыты ли DevTools
+                        let was_closed = !window.is_devtools_open();
+
+                        // Открываем DevTools если они закрыты
+                        if was_closed {
+                            let _ = window.open_devtools();
+
+                            // Сохраняем состояние
+                            let mut state = load_state();
+                            state.devtools_open = true;
+                            save_state(&state);
+                        }
+
+                        // Активируем инспектор элементов
+                        // После открытия DevTools нужно небольшое ожидание
+                        let delay = if was_closed { 700 } else { 100 };
+                        let window_clone = window.clone();
+
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(delay));
+
+                            // Попытка активировать инспектор через JavaScript
+                            let _ = window_clone.eval(
+                                r#"
+                                (function() {
+                                    console.log('Attempting to activate element inspector...');
+
+                                    // Способ 1: Эмуляция нажатия Ctrl+Shift+C
+                                    function triggerInspector() {
+                                        const events = ['keydown', 'keypress', 'keyup'];
+
+                                        events.forEach(eventType => {
+                                            const event = new KeyboardEvent(eventType, {
+                                                key: 'C',
+                                                code: 'KeyC',
+                                                keyCode: 67,
+                                                which: 67,
+                                                charCode: eventType === 'keypress' ? 67 : 0,
+                                                ctrlKey: true,
+                                                shiftKey: true,
+                                                altKey: false,
+                                                metaKey: false,
+                                                bubbles: true,
+                                                cancelable: true,
+                                                composed: true
+                                            });
+
+                                            // Отправляем события на разные цели
+                                            document.dispatchEvent(event);
+                                            window.dispatchEvent(event);
+                                            document.body && document.body.dispatchEvent(event);
+                                        });
+                                    }
+
+                                    // Запускаем с задержками для надежности
+                                    triggerInspector();
+                                    setTimeout(triggerInspector, 50);
+                                    setTimeout(triggerInspector, 150);
+
+                                    console.log('Element inspector activation triggered');
+                                })();
+                                "#
+                            );
+
+                            println!("Inspector element picker requested");
+                        });
+                    }
+                }
+            })?;
+
             // Восстанавливаем состояние DevTools
             let saved_state = load_state();
             println!("Loaded state: devtools_open = {}", saved_state.devtools_open);

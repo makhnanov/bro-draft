@@ -28,7 +28,7 @@
   },
   "plugins": {
     "globalShortcut": {
-      "shortcuts": ["F12", "F5", "F11"]
+      "shortcuts": ["F12", "F5", "F11", "CommandOrControl+Shift+C"]
     }
   },
   "bundle": {

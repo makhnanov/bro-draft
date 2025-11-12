@@ -15,20 +15,23 @@
 .youtube-page
   display flex
   flex-direction column
-  align-items center
-  justify-content center
+  //justify-content center
   min-height 60vh
-  padding 20px
+  padding-top 20px
+  padding-bottom 20px
+  padding-left 25px
+  padding-right 25px
 
 .page-title
   font-size 48px
   font-weight 700
   color #0052cc
-  margin-bottom 40px
-  text-align center
+  margin-bottom 10px
+  text-align left
 
 .youtube-content
   text-align center
+  border 1px solid black
 
 .youtube-subtitle
   font-size 32px
