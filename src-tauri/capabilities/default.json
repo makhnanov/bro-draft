@@ -7,5 +7,8 @@
     "core:default",
     "opener:default",
     "core:window:allow-close"
-  ]
+  ],
+  "remote": {
+    "urls": ["https://api.coingecko.com", "https://*.cloudflare.com", "https://speed.cloudflare.com"]
+  }
 }
