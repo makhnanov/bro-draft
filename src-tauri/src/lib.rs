@@ -6,9 +6,25 @@ use std::fs;
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 struct AppState {
     devtools_open: bool,
+    window_x: Option<i32>,
+    window_y: Option<i32>,
+    window_width: Option<u32>,
+    window_height: Option<u32>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            devtools_open: false,
+            window_x: None,
+            window_y: None,
+            window_width: None,
+            window_height: None,
+        }
+    }
 }
 
 fn get_config_path() -> Option<PathBuf> {
@@ -224,9 +240,9 @@ pub fn run() {
                             let _ = window.open_devtools();
                         }
                         // Сохраняем новое состояние
-                        save_state(&AppState {
-                            devtools_open: !is_open,
-                        });
+                        let mut state = load_state();
+                        state.devtools_open = !is_open;
+                        save_state(&state);
                     }
                 }
             })?;
@@ -264,6 +280,39 @@ pub fn run() {
                     println!("Opening DevTools on startup...");
                     let _ = window.open_devtools();
                 }
+            }
+
+            // Восстанавливаем положение и размер окна
+            if let Some(window) = app.get_webview_window("main") {
+                if let (Some(x), Some(y)) = (saved_state.window_x, saved_state.window_y) {
+                    println!("Restoring window position: x={}, y={}", x, y);
+                    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+                }
+                if let (Some(width), Some(height)) = (saved_state.window_width, saved_state.window_height) {
+                    println!("Restoring window size: {}x{}", width, height);
+                    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
+                }
+
+                // Слушаем события изменения положения и размера окна
+                window.on_window_event(move |event| {
+                    match event {
+                        tauri::WindowEvent::Moved(position) => {
+                            println!("Window moved to: x={}, y={}", position.x, position.y);
+                            let mut state = load_state();
+                            state.window_x = Some(position.x);
+                            state.window_y = Some(position.y);
+                            save_state(&state);
+                        }
+                        tauri::WindowEvent::Resized(size) => {
+                            println!("Window resized to: {}x{}", size.width, size.height);
+                            let mut state = load_state();
+                            state.window_width = Some(size.width);
+                            state.window_height = Some(size.height);
+                            save_state(&state);
+                        }
+                        _ => {}
+                    }
+                });
             }
 
             Ok(())

@@ -469,195 +469,171 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped>
-.test-page {
-  padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
+<style scoped lang="stylus">
+.test-page
+  padding 20px
+  max-width 1200px
+  margin 0 auto
 
-.page-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: #0052cc;
-  margin-bottom: 40px;
-  text-align: center;
-}
+.page-title
+  font-size 32px
+  font-weight 700
+  color #0052cc
+  margin-bottom 40px
+  text-align center
 
-.clock {
-  position: fixed;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 48px;
-  font-weight: 700;
-  font-family: 'Inter', 'Arial', sans-serif;
-  color: #ffffff;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
-  letter-spacing: 2px;
-  background-color: rgba(60, 60, 60, 0.85);
-  padding: 12px 32px;
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-}
+.clock
+  position fixed
+  top 16px
+  left 50%
+  transform translateX(-50%)
+  font-size 48px
+  font-weight 700
+  font-family 'Inter', 'Arial', sans-serif
+  color #ffffff
+  text-shadow 0 2px 8px rgba(0, 0, 0, 0.3)
+  z-index 1000
+  letter-spacing 2px
+  background-color rgba(60, 60, 60, 0.85)
+  padding 12px 32px
+  border-radius 12px
+  backdrop-filter blur(10px)
+  box-shadow 0 4px 16px rgba(0, 0, 0, 0.2)
 
-.bitcoin-widget {
-  position: fixed;
-  top: 16px;
-  left: 50%;
-  transform: translateX(180px);
-  background-color: rgba(40, 40, 40, 0.9);
-  padding: 12px 20px;
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  z-index: 1000;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  min-width: 180px;
-}
+.bitcoin-widget
+  position fixed
+  top 16px
+  left 50%
+  transform translateX(180px)
+  background-color rgba(40, 40, 40, 0.9)
+  padding 12px 20px
+  border-radius 12px
+  backdrop-filter blur(10px)
+  box-shadow 0 4px 16px rgba(0, 0, 0, 0.2)
+  z-index 1000
+  cursor pointer
+  transition all 0.2s ease
+  min-width 180px
 
-.bitcoin-widget:hover {
-  background-color: rgba(50, 50, 50, 0.95);
-  transform: translateX(180px) scale(1.02);
-}
+  &:hover
+    background-color rgba(50, 50, 50, 0.95)
+    transform translateX(180px) scale(1.02)
 
-.bitcoin-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
+.bitcoin-header
+  display flex
+  align-items center
+  gap 8px
+  margin-bottom 8px
 
-.bitcoin-icon {
-  width: 20px;
-  height: 20px;
-  color: #f7931a;
-}
+.bitcoin-icon
+  width 20px
+  height 20px
+  color #f7931a
 
-.bitcoin-label {
-  font-size: 14px;
-  font-weight: 600;
-  color: #ffffff;
-  font-family: 'Inter', 'Arial', sans-serif;
-}
+.bitcoin-label
+  font-size 14px
+  font-weight 600
+  color #ffffff
+  font-family 'Inter', 'Arial', sans-serif
 
-.dev-mode-badge {
-  margin-left: auto;
-  font-size: 10px;
-  font-weight: 700;
-  color: #000;
-  background-color: #facc15;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
+.dev-mode-badge
+  margin-left auto
+  font-size 10px
+  font-weight 700
+  color #000
+  background-color #facc15
+  padding 2px 6px
+  border-radius 4px
 
-.bitcoin-price {
-  font-size: 24px;
-  font-weight: 700;
-  color: #ffffff;
-  font-family: 'Inter', 'Arial', sans-serif;
-  margin-bottom: 8px;
-}
+.bitcoin-price
+  font-size 24px
+  font-weight 700
+  color #ffffff
+  font-family 'Inter', 'Arial', sans-serif
+  margin-bottom 8px
 
-.bitcoin-progress-bar {
-  width: 100%;
-  height: 4px;
-  background-color: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
-  overflow: hidden;
-}
+.bitcoin-progress-bar
+  width 100%
+  height 4px
+  background-color rgba(255, 255, 255, 0.2)
+  border-radius 2px
+  overflow hidden
 
-.bitcoin-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #f7931a 0%, #ffb84d 100%);
-  transition: width 0.1s linear;
-  border-radius: 2px;
-}
+.bitcoin-progress-fill
+  height 100%
+  background linear-gradient(90deg, #f7931a 0%, #ffb84d 100%)
+  transition width 0.1s linear
+  border-radius 2px
 
-.speedometers-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 30px;
-  justify-items: center;
-}
+.speedometers-container
+  display grid
+  grid-template-columns repeat(auto-fit, minmax(200px, 1fr))
+  gap 30px
+  justify-items center
 
-.speedometer-box {
-  background-color: rgba(40, 40, 40, 0.9);
-  padding: 20px;
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  width: 100%;
-  max-width: 250px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
+.speedometer-box
+  background-color rgba(40, 40, 40, 0.9)
+  padding 20px
+  border-radius 12px
+  backdrop-filter blur(10px)
+  box-shadow 0 4px 16px rgba(0, 0, 0, 0.2)
+  width 100%
+  max-width 250px
+  transition transform 0.2s ease, box-shadow 0.2s ease
 
-.speedometer-box:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-}
+  &:hover
+    transform scale(1.05)
+    box-shadow 0 6px 20px rgba(0, 0, 0, 0.3)
 
-.speedometer-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #888;
-  text-align: center;
-  margin-bottom: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
+.speedometer-title
+  font-size 14px
+  font-weight 600
+  color #888
+  text-align center
+  margin-bottom 10px
+  text-transform uppercase
+  letter-spacing 1px
 
-.speedometer-wrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
+.speedometer-wrapper
+  display flex
+  flex-direction column
+  align-items center
 
-.speedometer {
-  width: 100%;
-  height: auto;
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.15));
-}
+.speedometer
+  width 100%
+  height auto
+  filter drop-shadow(0 2px 8px rgba(0, 0, 0, 0.15))
 
-.progress-arc {
-  transition: stroke 0.3s ease, stroke-dasharray 0.3s ease;
-}
+.progress-arc
+  transition stroke 0.3s ease, stroke-dasharray 0.3s ease
 
-.temperature-text {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: 'Inter', 'Arial', sans-serif;
-  transition: fill 0.3s ease;
-}
+.temperature-text
+  font-size 20px
+  font-weight 700
+  font-family 'Inter', 'Arial', sans-serif
+  transition fill 0.3s ease
 
-.speed-text {
-  font-size: 18px;
-  font-weight: 700;
-  font-family: 'Inter', 'Arial', sans-serif;
-  transition: fill 0.3s ease;
-}
+.speed-text
+  font-size 18px
+  font-weight 700
+  font-family 'Inter', 'Arial', sans-serif
+  transition fill 0.3s ease
 
-.label-text {
-  font-size: 14px;
-  font-weight: 600;
-}
+.label-text
+  font-size 14px
+  font-weight 600
 
-.speedtest-progress-bar {
-  width: 100%;
-  height: 3px;
-  background-color: rgba(59, 130, 246, 0.2);
-  border-radius: 2px;
-  overflow: hidden;
-  margin-top: 10px;
-}
+.speedtest-progress-bar
+  width 100%
+  height 3px
+  background-color rgba(59, 130, 246, 0.2)
+  border-radius 2px
+  overflow hidden
+  margin-top 10px
 
-.speedtest-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
-  transition: width 0.1s linear;
-  border-radius: 2px;
-}
+.speedtest-progress-fill
+  height 100%
+  background linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%)
+  transition width 0.1s linear
+  border-radius 2px
 </style>

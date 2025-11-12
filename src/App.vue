@@ -100,184 +100,159 @@ async function closeApp() {
   </div>
 </template>
 
-<style scoped>
-/* Боковое меню в стиле JIRA */
-.sidebar {
-  position: fixed;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 240px;
-  background: linear-gradient(180deg, #0747a6 0%, #0052cc 100%);
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
-  transition: width 0.3s ease;
-  z-index: 999;
-  display: flex;
-  flex-direction: column;
-}
+<style scoped lang="stylus">
+// Боковое меню в стиле JIRA
+.sidebar
+  position fixed
+  left 0
+  top 0
+  bottom 0
+  width 240px
+  background linear-gradient(180deg, #0747a6 0%, #0052cc 100%)
+  box-shadow 2px 0 8px rgba(0, 0, 0, 0.15)
+  transition width 0.3s ease
+  z-index 999
+  display flex
+  flex-direction column
 
-.sidebar.collapsed {
-  width: 64px;
-}
+  &.collapsed
+    width 64px
 
-.sidebar-toggle {
-  width: 100%;
-  height: 64px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #ffffff;
-  transition: background-color 0.2s ease;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
+    .nav-icon
+      margin-right 0
 
-.sidebar-toggle:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
+    .nav-text
+      opacity 0
+      width 0
+      overflow hidden
 
-.toggle-icon {
-  width: 24px;
-  height: 24px;
-}
+    ~ .main-content
+      margin-left 64px
 
-.sidebar-nav {
-  flex: 1;
-  padding: 16px 0;
-  overflow-y: auto;
-}
+.sidebar-toggle
+  width 100%
+  height 64px
+  background transparent
+  border none
+  cursor pointer
+  display flex
+  align-items center
+  justify-content center
+  color #ffffff
+  transition background-color 0.2s ease
+  border-bottom 1px solid rgba(255, 255, 255, 0.1)
 
-.nav-item {
-  display: flex;
-  align-items: center;
-  padding: 12px 20px;
-  color: rgba(255, 255, 255, 0.8);
-  text-decoration: none;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  position: relative;
-  white-space: nowrap;
-}
+  &:hover
+    background-color rgba(255, 255, 255, 0.1)
 
-.nav-item:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-}
+.toggle-icon
+  width 24px
+  height 24px
 
-.nav-item.router-link-active {
-  background-color: rgba(255, 255, 255, 0.15);
-  color: #ffffff;
-}
+.sidebar-nav
+  flex 1
+  padding 16px 0
+  overflow-y auto
 
-.nav-item.router-link-active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background-color: #ffffff;
-}
+.nav-item
+  display flex
+  align-items center
+  padding 12px 20px
+  color rgba(255, 255, 255, 0.8)
+  text-decoration none
+  font-size 14px
+  font-weight 500
+  transition all 0.2s ease
+  position relative
+  white-space nowrap
 
-.nav-icon {
-  width: 20px;
-  height: 20px;
-  min-width: 20px;
-  margin-right: 12px;
-}
+  &:hover
+    background-color rgba(255, 255, 255, 0.1)
+    color #ffffff
 
-.sidebar.collapsed .nav-icon {
-  margin-right: 0;
-}
+  &.router-link-active
+    background-color rgba(255, 255, 255, 0.15)
+    color #ffffff
 
-.nav-text {
-  opacity: 1;
-  transition: opacity 0.2s ease;
-}
+    &::before
+      content ''
+      position absolute
+      left 0
+      top 0
+      bottom 0
+      width 3px
+      background-color #ffffff
 
-.sidebar.collapsed .nav-text {
-  opacity: 0;
-  width: 0;
-  overflow: hidden;
-}
+.nav-icon
+  width 20px
+  height 20px
+  min-width 20px
+  margin-right 12px
 
-.close-button {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  width: 40px;
-  height: 40px;
-  background-color: #dc3545;
-  border: none;
-  border-radius: 8px 8px 8px 0px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
-  z-index: 1000;
-}
+.nav-text
+  opacity 1
+  transition opacity 0.2s ease
 
-.close-button:hover {
-  background-color: #c82333;
-  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.5);
-  transform: scale(1.05);
-}
+.close-button
+  position fixed
+  top 16px
+  right 16px
+  width 40px
+  height 40px
+  background-color #dc3545
+  border none
+  border-radius 8px 8px 8px 0px
+  cursor pointer
+  display flex
+  align-items center
+  justify-content center
+  padding 0
+  transition all 0.2s ease
+  box-shadow 0 2px 8px rgba(220, 53, 69, 0.3)
+  z-index 1000
 
-.close-button:active {
-  transform: scale(0.95);
-}
+  &:hover
+    background-color #c82333
+    box-shadow 0 4px 12px rgba(220, 53, 69, 0.5)
+    transform scale(1.05)
 
-.close-icon {
-  width: 20px;
-  height: 20px;
-}
+  &:active
+    transform scale(0.95)
 
-.main-content {
-  margin-left: 240px;
-  padding: 120px 20px 20px 20px;
-  transition: margin-left 0.3s ease;
-  min-height: 100vh;
-}
+.close-icon
+  width 20px
+  height 20px
 
-.sidebar.collapsed ~ .main-content {
-  margin-left: 64px;
-}
+.main-content
+  margin-left 240px
+  // padding 120px 20px 20px 20px
+  transition margin-left 0.3s ease
+  min-height 100vh
 </style>
-<style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+<style lang="stylus">
+*
+  margin 0
+  padding 0
+  box-sizing border-box
 
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
+:root
+  font-family Inter, Avenir, Helvetica, Arial, sans-serif
+  font-size 16px
+  color #0f0f0f
+  background-color #f6f6f6
+  font-synthesis none
+  text-rendering optimizeLegibility
+  -webkit-font-smoothing antialiased
+  -moz-osx-font-smoothing grayscale
+  -webkit-text-size-adjust 100%
 
-html, body {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
+html, body
+  width 100%
+  height 100%
+  overflow hidden
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-}
+@media (prefers-color-scheme: dark)
+  :root
+    color #f6f6f6
+    background-color #2f2f2f
 </style>
