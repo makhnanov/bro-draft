@@ -6,6 +6,7 @@ import WatcherPage from '../pages/WatcherPage.vue'
 import ConvertersPage from '../pages/ConvertersPage.vue'
 import AutomatizationPage from '../pages/AutomatizationPage.vue'
 import TestPage from '../pages/TestPage.vue'
+import YouTubePage from '../pages/YouTubePage.vue'
 
 const routes = [
   {
@@ -42,6 +43,11 @@ const routes = [
     path: '/test',
     name: 'Test',
     component: TestPage
+  },
+  {
+    path: '/youtube',
+    name: 'YouTube',
+    component: YouTubePage
   }
 ]
 
