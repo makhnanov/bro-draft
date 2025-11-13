@@ -377,8 +377,8 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false) // Сначала скрываем
-        .focused(false)
         .resizable(false)
+        .fullscreen(true) // Полноэкранный режим
         .build()
         .map_err(|e| format!("Failed to create area selector window {}: {}", index, e))?;
 
@@ -387,11 +387,13 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
         // Даём время на загрузку страницы
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
-        // Показываем окно
-        let _ = webview_window.show();
+        // Устанавливаем полноэкранный режим и показываем окно
+        let _ = webview_window.set_fullscreen(true);
         let _ = webview_window.set_always_on_top(true);
+        let _ = webview_window.set_focus();
+        let _ = webview_window.show();
 
-        println!("Window {} shown for monitor {}", window_label, index);
+        println!("Window {} shown in fullscreen for monitor {}", window_label, index);
     }
 
     // Регистрируем глобальную горячую клавишу ESC для закрытия всех окон (если ещё не зарегистрирована)
