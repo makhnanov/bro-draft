@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useRoute } from "vue-router";
 
+const route = useRoute();
 const isSidebarCollapsed = ref(false);
+
+// Проверяем, является ли текущая страница area-selector
+const isAreaSelector = computed(() => route.path === '/area-selector');
 
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
@@ -14,8 +19,8 @@ async function closeApp() {
 </script>
 
 <template>
-  <!-- Боковое меню в стиле JIRA -->
-  <div :class="['sidebar', { collapsed: isSidebarCollapsed }]">
+  <!-- Боковое меню в стиле JIRA (скрываем для area-selector) -->
+  <div v-if="!isAreaSelector" :class="['sidebar', { collapsed: isSidebarCollapsed }]">
     <button class="sidebar-toggle" @click="toggleSidebar">
       <svg viewBox="0 0 24 24" class="toggle-icon">
         <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -84,10 +89,16 @@ async function closeApp() {
         </svg>
         <span class="nav-text">YouTube</span>
       </router-link>
+      <router-link to="/translations" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="nav-text">Translations</span>
+      </router-link>
     </nav>
   </div>
 
-  <button class="close-button" @click="closeApp">
+  <button v-if="!isAreaSelector" class="close-button" @click="closeApp">
     <svg viewBox="0 0 24 24" class="close-icon">
       <line x1="18" y1="6" x2="6" y2="18" stroke="white" stroke-width="2" stroke-linecap="round"/>
       <line x1="6" y1="6" x2="18" y2="18" stroke="white" stroke-width="2" stroke-linecap="round"/>
@@ -95,7 +106,7 @@ async function closeApp() {
   </button>
 
   <!-- Контент страниц -->
-  <div class="main-content">
+  <div :class="['main-content', { 'fullscreen': isAreaSelector }]">
     <router-view />
   </div>
 </template>
@@ -228,6 +239,15 @@ async function closeApp() {
   // padding 120px 20px 20px 20px
   transition margin-left 0.3s ease
   min-height 100vh
+
+  &.fullscreen
+    margin-left 0
+    position fixed
+    top 0
+    left 0
+    width 100vw
+    height 100vh
+    z-index 99999
 </style>
 <style lang="stylus">
 *

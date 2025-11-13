@@ -7,6 +7,8 @@ import ConvertersPage from '../pages/ConvertersPage.vue'
 import AutomatizationPage from '../pages/AutomatizationPage.vue'
 import TestPage from '../pages/TestPage.vue'
 import YouTubePage from '../pages/YouTubePage.vue'
+import TranslationsPage from '../pages/TranslationsPage.vue'
+import AreaSelectorPage from '../pages/AreaSelectorPage.vue'
 
 const routes = [
   {
@@ -48,6 +50,16 @@ const routes = [
     path: '/youtube',
     name: 'YouTube',
     component: YouTubePage
+  },
+  {
+    path: '/translations',
+    name: 'Translations',
+    component: TranslationsPage
+  },
+  {
+    path: '/area-selector',
+    name: 'AreaSelector',
+    component: AreaSelectorPage
   }
 ]
 

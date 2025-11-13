@@ -5,6 +5,7 @@ use sysinfo::Components;
 use std::fs;
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
+use screenshots::Screen;
 
 #[derive(Serialize, Deserialize)]
 struct AppState {
@@ -13,6 +14,7 @@ struct AppState {
     window_y: Option<i32>,
     window_width: Option<u32>,
     window_height: Option<u32>,
+    translation_hotkey: Option<String>,
 }
 
 impl Default for AppState {
@@ -23,6 +25,7 @@ impl Default for AppState {
             window_y: None,
             window_width: None,
             window_height: None,
+            translation_hotkey: None,
         }
     }
 }
@@ -197,6 +200,362 @@ async fn get_network_speed() -> Result<String, String> {
     Ok(result)
 }
 
+// Команда для захвата полного экрана
+#[tauri::command]
+async fn capture_full_screenshot() -> Result<String, String> {
+    use png::Encoder;
+    use png::ColorType;
+    use std::io::BufWriter;
+
+    println!("Capturing full screenshot...");
+
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+
+    if screens.is_empty() {
+        return Err("No screens found".to_string());
+    }
+
+    // Используем первый экран
+    let screen = &screens[0];
+    let captured_image = screen.capture().map_err(|e| format!("Failed to capture screen: {}", e))?;
+
+    // Кодируем изображение в PNG
+    let width = captured_image.width();
+    let height = captured_image.height();
+
+    // Получаем RAW данные из изображения
+    let rgba_data: Vec<u8> = captured_image.rgba().to_vec();
+
+    // Кодируем в PNG
+    let mut png_data = Vec::new();
+    {
+        let w = BufWriter::new(&mut png_data);
+        let mut encoder = Encoder::new(w, width, height);
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        let mut writer = encoder.write_header()
+            .map_err(|e| format!("Failed to write PNG header: {}", e))?;
+
+        writer.write_image_data(&rgba_data)
+            .map_err(|e| format!("Failed to write PNG data: {}", e))?;
+    }
+
+    // Конвертируем в base64
+    let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_data);
+
+    println!("Screenshot captured successfully");
+    Ok(base64_image)
+}
+
+use std::sync::Mutex;
+use std::collections::HashMap;
+
+// Глобальное состояние для хранения скриншотов (по одному на монитор)
+struct ScreenshotState {
+    data: Mutex<HashMap<usize, String>>, // monitor_index -> base64 screenshot
+}
+
+// Команда для получения сохранённого скриншота по индексу монитора
+#[tauri::command]
+fn get_stored_screenshot(monitor_index: usize, state: tauri::State<ScreenshotState>) -> Result<String, String> {
+    println!("get_stored_screenshot called for monitor {}", monitor_index);
+    let screenshots = state.data.lock().unwrap();
+
+    match screenshots.get(&monitor_index) {
+        Some(data) => {
+            println!("Screenshot found for monitor {}, length: {}", monitor_index, data.len());
+            Ok(data.clone())
+        }
+        None => {
+            println!("No screenshot for monitor {}", monitor_index);
+            Err(format!("No screenshot available for monitor {}", monitor_index))
+        }
+    }
+}
+
+// Команда для открытия окна выбора области поверх всей ОС
+#[tauri::command]
+async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_, ScreenshotState>) -> Result<(), String> {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+    use png::Encoder;
+    use png::ColorType;
+    use std::io::BufWriter;
+
+    println!("Capturing screenshot for area selection...");
+
+    // Закрываем существующие окна area-selector если они есть
+    let mut monitor_index = 0;
+    loop {
+        let window_label = format!("area-selector-{}", monitor_index);
+        if let Some(existing_window) = app_handle.get_webview_window(&window_label) {
+            println!("Closing existing area selector window: {}", window_label);
+            let _ = existing_window.close();
+        } else {
+            break;
+        }
+        monitor_index += 1;
+    }
+
+    // Даём время на закрытие окон
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Получаем все экраны
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+
+    if screens.is_empty() {
+        return Err("No screens found".to_string());
+    }
+
+    println!("Found {} screen(s)", screens.len());
+
+    // Захватываем скриншот каждого монитора отдельно
+    let mut screenshots_map = HashMap::new();
+
+    for (index, screen) in screens.iter().enumerate() {
+        let display = screen.display_info;
+        println!("Capturing screen {}: x={}, y={}, width={}, height={}",
+            index, display.x, display.y, display.width, display.height);
+
+        // Захватываем скриншот этого монитора
+        let captured = screen.capture().map_err(|e| format!("Failed to capture screen {}: {}", index, e))?;
+
+        let width = captured.width();
+        let height = captured.height();
+        let rgba_data = captured.rgba();
+
+        // Кодируем в PNG
+        let mut png_data = Vec::new();
+        {
+            let w = BufWriter::new(&mut png_data);
+            let mut encoder = Encoder::new(w, width, height);
+            encoder.set_color(ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+
+            let mut writer = encoder.write_header()
+                .map_err(|e| format!("Failed to write PNG header for screen {}: {}", index, e))?;
+
+            writer.write_image_data(rgba_data)
+                .map_err(|e| format!("Failed to write PNG data for screen {}: {}", index, e))?;
+        }
+
+        // Конвертируем в base64
+        let base64_screenshot = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_data);
+        println!("Screenshot {} size: {} bytes ({}x{})", index, base64_screenshot.len(), width, height);
+
+        screenshots_map.insert(index, base64_screenshot);
+    }
+
+    // Сохраняем все скриншоты в state
+    {
+        let mut screenshots = state.data.lock().unwrap();
+        *screenshots = screenshots_map;
+    }
+
+    println!("Screenshots saved to state, creating windows for each monitor...");
+
+    // Создаём окно для каждого монитора
+    for (index, screen) in screens.iter().enumerate() {
+        let display = screen.display_info;
+        let window_label = format!("area-selector-{}", index);
+
+        println!("Creating window {} for monitor {} at ({}, {})", window_label, index, display.x, display.y);
+
+        let webview_window = WebviewWindowBuilder::new(
+            &app_handle,
+            &window_label,
+            WebviewUrl::App(format!("/index.html#/area-selector?monitor={}", index).into())
+        )
+        .title(&format!("Select Area - Monitor {}", index))
+        .position(display.x as f64, display.y as f64)
+        .inner_size(display.width as f64, display.height as f64)
+        .decorations(false)
+        .transparent(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false) // Сначала скрываем
+        .focused(false)
+        .resizable(false)
+        .build()
+        .map_err(|e| format!("Failed to create area selector window {}: {}", index, e))?;
+
+        println!("Window {} created for monitor {}", window_label, index);
+
+        // Даём время на загрузку страницы
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        // Показываем окно
+        let _ = webview_window.show();
+        let _ = webview_window.set_always_on_top(true);
+
+        println!("Window {} shown for monitor {}", window_label, index);
+    }
+
+    // Регистрируем глобальную горячую клавишу ESC для закрытия всех окон (если ещё не зарегистрирована)
+    let app_clone = app_handle.clone();
+    let register_result = app_handle.global_shortcut().on_shortcut("Escape", move |_app, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            println!("ESC shortcut pressed! Closing all area-selector windows");
+            let mut monitor_idx = 0;
+            loop {
+                let window_label = format!("area-selector-{}", monitor_idx);
+                if let Some(win) = app_clone.get_webview_window(&window_label) {
+                    println!("Closing window: {}", window_label);
+                    let _ = win.close();
+                    monitor_idx += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    });
+
+    match register_result {
+        Ok(_) => println!("ESC shortcut registered for all area-selector windows"),
+        Err(e) => {
+            println!("ESC shortcut already registered or failed: {}", e);
+            // Не возвращаем ошибку, так как это нормально если уже зарегистрирована
+        }
+    }
+
+    Ok(())
+}
+
+// Команда для обработки выбранной области
+#[tauri::command]
+async fn capture_area_screenshot(x: u32, y: u32, width: u32, height: u32) -> Result<String, String> {
+    use png::Encoder;
+    use png::ColorType;
+    use std::io::BufWriter;
+
+    println!("Capturing area screenshot: x={}, y={}, width={}, height={}", x, y, width, height);
+
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+
+    if screens.is_empty() {
+        return Err("No screens found".to_string());
+    }
+
+    // Используем первый экран
+    let screen = &screens[0];
+    let full_image = screen.capture().map_err(|e| format!("Failed to capture screen: {}", e))?;
+
+    // Получаем RAW данные из изображения
+    let full_rgba_data: Vec<u8> = full_image.rgba().to_vec();
+    let full_width = full_image.width();
+    let full_height = full_image.height();
+
+    // Проверяем границы
+    if x + width > full_width || y + height > full_height {
+        return Err("Selection area out of bounds".to_string());
+    }
+
+    // Обрезаем изображение
+    let mut cropped_data = Vec::with_capacity((width * height * 4) as usize);
+
+    for row in y..(y + height) {
+        let start_idx = ((row * full_width + x) * 4) as usize;
+        let end_idx = start_idx + (width * 4) as usize;
+        cropped_data.extend_from_slice(&full_rgba_data[start_idx..end_idx]);
+    }
+
+    // Кодируем обрезанное изображение в PNG
+    let mut png_data = Vec::new();
+    {
+        let w = BufWriter::new(&mut png_data);
+        let mut encoder = Encoder::new(w, width, height);
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        let mut writer = encoder.write_header()
+            .map_err(|e| format!("Failed to write PNG header: {}", e))?;
+
+        writer.write_image_data(&cropped_data)
+            .map_err(|e| format!("Failed to write PNG data: {}", e))?;
+    }
+
+    // Конвертируем в base64
+    let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_data);
+
+    println!("Area screenshot captured successfully");
+    Ok(base64_image)
+}
+
+// Команда для сохранения горячей клавиши
+#[tauri::command]
+fn save_translation_hotkey(hotkey: String) -> Result<(), String> {
+    let mut state = load_state();
+    state.translation_hotkey = Some(hotkey.clone());
+    save_state(&state);
+    println!("Translation hotkey saved: {}", hotkey);
+    Ok(())
+}
+
+// Команда для получения сохраненной горячей клавиши
+#[tauri::command]
+fn get_translation_hotkey() -> Result<Option<String>, String> {
+    let state = load_state();
+    Ok(state.translation_hotkey)
+}
+
+// Команда для отправки изображения в ChatGPT
+#[tauri::command]
+async fn send_to_chatgpt(api_key: String, image_base64: String, prompt: String) -> Result<String, String> {
+    use reqwest;
+
+    println!("Sending to ChatGPT...");
+
+    let client = reqwest::Client::new();
+
+    let request_body = serde_json::json!({
+        "model": "gpt-4o",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:image/png;base64,{}", image_base64)
+                        }
+                    }
+                ]
+            }
+        ],
+        "max_tokens": 1000
+    });
+
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("ChatGPT API error: {}", error_text));
+    }
+
+    let response_json: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let content = response_json["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or("No content in response")?
+        .to_string();
+
+    println!("ChatGPT response received");
+    Ok(content)
+}
+
 // Wait for dev server to be ready
 fn wait_for_dev_server(url: &str, max_attempts: u32) -> bool {
     for attempt in 1..=max_attempts {
@@ -229,6 +588,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(ScreenshotState {
+            data: Mutex::new(HashMap::new()),
+        })
         .setup(|app| {
             app.global_shortcut().on_shortcut("F12", |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
@@ -270,6 +632,26 @@ pub fn run() {
                     }
                 }
             })?;
+
+            // Регистрируем горячую клавишу для переводов, если она сохранена
+            let saved_state = load_state();
+            if let Some(translation_hotkey) = saved_state.translation_hotkey.clone() {
+                let hotkey_str = translation_hotkey.clone();
+                println!("Registering translation hotkey: {}", hotkey_str);
+
+                match app.global_shortcut().on_shortcut(hotkey_str.as_str(), move |app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        println!("Translation hotkey pressed!");
+                        if let Some(window) = app.get_webview_window("main") {
+                            // Отправляем событие в фронтенд для захвата скриншота
+                            let _ = window.eval("window.dispatchEvent(new CustomEvent('translation-hotkey-pressed'))");
+                        }
+                    }
+                }) {
+                    Ok(_) => println!("Translation hotkey registered successfully"),
+                    Err(e) => eprintln!("Failed to register translation hotkey: {}", e),
+                }
+            }
 
             app.global_shortcut().on_shortcut("CommandOrControl+Shift+C", |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
@@ -392,7 +774,18 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, get_cpu_temperature, get_network_speed])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            get_cpu_temperature,
+            get_network_speed,
+            capture_full_screenshot,
+            open_area_selector,
+            get_stored_screenshot,
+            capture_area_screenshot,
+            save_translation_hotkey,
+            get_translation_hotkey,
+            send_to_chatgpt
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
