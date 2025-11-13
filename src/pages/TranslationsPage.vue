@@ -11,12 +11,30 @@ const showActionDialog = ref(false);
 const translationResult = ref('');
 const isProcessing = ref(false);
 
-// Загружаем сохраненную горячую клавишу при монтировании
+// Автосохранение API ключа при изменении
+async function handleApiKeyChange() {
+  if (apiKey.value) {
+    try {
+      await invoke('save_openai_api_key', { apiKey: apiKey.value });
+      console.log('API key saved');
+    } catch (error) {
+      console.error('Failed to save API key:', error);
+    }
+  }
+}
+
+// Загружаем сохраненную горячую клавишу и API ключ при монтировании
 onMounted(async () => {
   try {
     const savedHotkey = await invoke<string | null>('get_translation_hotkey');
     if (savedHotkey) {
       currentHotkey.value = savedHotkey;
+    }
+
+    // Загружаем сохраненный API ключ
+    const savedApiKey = await invoke<string | null>('get_openai_api_key');
+    if (savedApiKey) {
+      apiKey.value = savedApiKey;
     }
 
     // Слушаем событие от Rust, когда горячая клавиша нажата
@@ -25,7 +43,7 @@ onMounted(async () => {
       captureScreenshot();
     });
   } catch (error) {
-    console.error('Failed to load hotkey:', error);
+    console.error('Failed to load settings:', error);
   }
 });
 
@@ -118,13 +136,19 @@ async function captureScreenshot() {
     // Слушаем событие с выбранной областью
     const unlisten = await listen('area-selected', async (event: any) => {
       console.log('Received area-selected event:', event.payload);
-      const { x, y, width, height } = event.payload;
+      const { x, y, width, height, monitorIndex } = event.payload;
 
       try {
         // Окна уже закрыты в handle_area_selection
-        console.log('Capturing area screenshot...');
-        // Создаем скриншот выбранной области
-        const base64Image = await invoke<string>('capture_area_screenshot', { x, y, width, height });
+        console.log('Capturing area screenshot from monitor', monitorIndex);
+        // Создаем скриншот выбранной области из нужного монитора
+        const base64Image = await invoke<string>('capture_area_screenshot', {
+          x,
+          y,
+          width,
+          height,
+          monitorIndex
+        });
         console.log('Screenshot captured, length:', base64Image.length);
         screenshot.value = base64Image;
         showActionDialog.value = true;
@@ -174,6 +198,10 @@ async function translateScreenshot() {
 
   try {
     isProcessing.value = true;
+
+    // Сохраняем API ключ, если он изменился
+    await invoke('save_openai_api_key', { apiKey: apiKey.value });
+
     const prompt = 'Распознай текст на этом изображении и переведи его на русский язык. Верни только переведенный текст.';
 
     const result = await invoke<string>('send_to_chatgpt', {
@@ -216,6 +244,7 @@ async function testCapture() {
           <label>OpenAI API Key:</label>
           <input
             v-model="apiKey"
+            @blur="handleApiKeyChange"
             type="password"
             placeholder="sk-..."
             class="api-input"

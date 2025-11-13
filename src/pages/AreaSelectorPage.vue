@@ -11,11 +11,12 @@ const currentY = ref(0);
 const screenshot = ref<string>('');
 const isLoading = ref(true);
 const wrapperRef = ref<HTMLElement | null>(null);
+const monitorIndex = ref(0);
 
 onMounted(async () => {
   // Получаем индекс монитора из URL
   const urlParams = new URLSearchParams(window.location.hash.split('?')[1]);
-  const monitorIndex = parseInt(urlParams.get('monitor') || '0', 10);
+  monitorIndex.value = parseInt(urlParams.get('monitor') || '0', 10);
 
   const currentWin = getCurrentWindow();
 
@@ -36,7 +37,7 @@ onMounted(async () => {
 
   // Получаем скриншот из state
   try {
-    const screenshotData = await invoke<string>('get_stored_screenshot', { monitorIndex });
+    const screenshotData = await invoke<string>('get_stored_screenshot', { monitorIndex: monitorIndex.value });
 
     if (screenshotData && screenshotData.length > 0) {
       screenshot.value = screenshotData;
@@ -86,8 +87,14 @@ async function handleMouseUp() {
   // Вызываем команду Rust для обработки выбора области
   // Она закроет все окна и отправит событие в главное окно
   try {
-    console.log('Calling handle_area_selection...');
-    await invoke('handle_area_selection', { x, y, width, height });
+    console.log('Calling handle_area_selection with monitor:', monitorIndex.value);
+    await invoke('handle_area_selection', {
+      x,
+      y,
+      width,
+      height,
+      monitorIndex: monitorIndex.value
+    });
     console.log('handle_area_selection completed');
   } catch (error) {
     console.error('Failed to handle selection:', error);

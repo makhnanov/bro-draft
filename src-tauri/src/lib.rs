@@ -16,6 +16,7 @@ struct AppState {
     window_height: Option<u32>,
     translation_hotkey: Option<String>,
     last_route: Option<String>,
+    openai_api_key: Option<String>,
 }
 
 impl Default for AppState {
@@ -28,6 +29,7 @@ impl Default for AppState {
             window_height: None,
             translation_hotkey: None,
             last_route: Some("/".to_string()),
+            openai_api_key: None,
         }
     }
 }
@@ -289,19 +291,24 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
 
     // Закрываем существующие окна area-selector если они есть
     let mut monitor_index = 0;
+    let mut closed_any = false;
     loop {
         let window_label = format!("area-selector-{}", monitor_index);
         if let Some(existing_window) = app_handle.get_webview_window(&window_label) {
             println!("Closing existing area selector window: {}", window_label);
             let _ = existing_window.close();
+            closed_any = true;
         } else {
             break;
         }
         monitor_index += 1;
     }
 
-    // Даём время на закрытие окон
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // Даём больше времени на закрытие окон, если они были закрыты
+    if closed_any {
+        println!("Waiting for windows to close completely...");
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
 
     // Получаем все экраны
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
@@ -428,26 +435,36 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
 async fn close_all_area_selectors(app_handle: tauri::AppHandle) -> Result<(), String> {
     println!("Closing all area-selector windows...");
     let mut monitor_index = 0;
+    let mut closed_count = 0;
     loop {
         let window_label = format!("area-selector-{}", monitor_index);
         if let Some(window) = app_handle.get_webview_window(&window_label) {
             println!("Closing window: {}", window_label);
-            let _ = window.close();
+            match window.close() {
+                Ok(_) => closed_count += 1,
+                Err(e) => println!("Warning: Failed to close window {}: {}", window_label, e),
+            }
             monitor_index += 1;
         } else {
             break;
         }
     }
-    println!("All area-selector windows closed");
+    if closed_count > 0 {
+        println!("Closed {} area-selector window(s)", closed_count);
+        // Даём время на закрытие окон
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    } else {
+        println!("No area-selector windows to close");
+    }
     Ok(())
 }
 
 // Команда для обработки выбора области и отправки события в главное окно
 #[tauri::command]
-async fn handle_area_selection(app_handle: tauri::AppHandle, x: u32, y: u32, width: u32, height: u32) -> Result<(), String> {
+async fn handle_area_selection(app_handle: tauri::AppHandle, x: u32, y: u32, width: u32, height: u32, monitor_index: usize) -> Result<(), String> {
     use tauri::Emitter;
 
-    println!("Handling area selection: x={}, y={}, width={}, height={}", x, y, width, height);
+    println!("Handling area selection: x={}, y={}, width={}, height={}, monitor={}", x, y, width, height, monitor_index);
 
     // Закрываем все окна area-selector
     close_all_area_selectors(app_handle.clone()).await?;
@@ -459,7 +476,8 @@ async fn handle_area_selection(app_handle: tauri::AppHandle, x: u32, y: u32, wid
             "x": x,
             "y": y,
             "width": width,
-            "height": height
+            "height": height,
+            "monitorIndex": monitor_index
         });
         main_window.emit("area-selected", payload)
             .map_err(|e| format!("Failed to emit event: {}", e))?;
@@ -471,33 +489,42 @@ async fn handle_area_selection(app_handle: tauri::AppHandle, x: u32, y: u32, wid
     Ok(())
 }
 
-// Команда для обработки выбранной области
+// Команда для обработки выбранной области - вырезает из сохранённого скриншота
 #[tauri::command]
-async fn capture_area_screenshot(x: u32, y: u32, width: u32, height: u32) -> Result<String, String> {
+async fn capture_area_screenshot(x: u32, y: u32, width: u32, height: u32, monitor_index: usize, state: tauri::State<'_, ScreenshotState>) -> Result<String, String> {
     use png::Encoder;
     use png::ColorType;
     use std::io::BufWriter;
 
-    println!("Capturing area screenshot: x={}, y={}, width={}, height={}", x, y, width, height);
+    println!("Cutting area from saved screenshot: x={}, y={}, width={}, height={}, monitor={}", x, y, width, height, monitor_index);
 
-    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+    // Получаем сохранённый скриншот для указанного монитора
+    let screenshots = state.data.lock().unwrap();
+    let base64_screenshot = screenshots.get(&monitor_index)
+        .ok_or(format!("No screenshot available for monitor {}", monitor_index))?;
 
-    if screens.is_empty() {
-        return Err("No screens found".to_string());
-    }
+    // Декодируем base64 в PNG данные
+    let png_data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, base64_screenshot)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
-    // Используем первый экран
-    let screen = &screens[0];
-    let full_image = screen.capture().map_err(|e| format!("Failed to capture screen: {}", e))?;
+    // Декодируем PNG в raw данные
+    let decoder = png::Decoder::new(&png_data[..]);
+    let mut reader = decoder.read_info()
+        .map_err(|e| format!("Failed to read PNG info: {}", e))?;
 
-    // Получаем RAW данные из изображения
-    let full_rgba_data: Vec<u8> = full_image.rgba().to_vec();
-    let full_width = full_image.width();
-    let full_height = full_image.height();
+    let mut full_rgba_data = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut full_rgba_data)
+        .map_err(|e| format!("Failed to decode PNG: {}", e))?;
+
+    let full_width = info.width;
+    let full_height = info.height;
+
+    println!("Original screenshot size: {}x{}", full_width, full_height);
 
     // Проверяем границы
     if x + width > full_width || y + height > full_height {
-        return Err("Selection area out of bounds".to_string());
+        return Err(format!("Selection area out of bounds: {}x{} at ({},{}) vs image {}x{}",
+            width, height, x, y, full_width, full_height));
     }
 
     // Обрезаем изображение
@@ -510,9 +537,9 @@ async fn capture_area_screenshot(x: u32, y: u32, width: u32, height: u32) -> Res
     }
 
     // Кодируем обрезанное изображение в PNG
-    let mut png_data = Vec::new();
+    let mut result_png_data = Vec::new();
     {
-        let w = BufWriter::new(&mut png_data);
+        let w = BufWriter::new(&mut result_png_data);
         let mut encoder = Encoder::new(w, width, height);
         encoder.set_color(ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
@@ -525,9 +552,9 @@ async fn capture_area_screenshot(x: u32, y: u32, width: u32, height: u32) -> Res
     }
 
     // Конвертируем в base64
-    let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_data);
+    let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &result_png_data);
 
-    println!("Area screenshot captured successfully");
+    println!("Area screenshot cut successfully from saved screenshot");
     Ok(base64_image)
 }
 
@@ -564,6 +591,23 @@ fn get_last_route() -> Result<Option<String>, String> {
     let state = load_state();
     println!("Last route loaded: {:?}", state.last_route);
     Ok(state.last_route)
+}
+
+// Команда для сохранения OpenAI API ключа
+#[tauri::command]
+fn save_openai_api_key(api_key: String) -> Result<(), String> {
+    let mut state = load_state();
+    state.openai_api_key = Some(api_key);
+    save_state(&state);
+    println!("OpenAI API key saved");
+    Ok(())
+}
+
+// Команда для получения сохраненного OpenAI API ключа
+#[tauri::command]
+fn get_openai_api_key() -> Result<Option<String>, String> {
+    let state = load_state();
+    Ok(state.openai_api_key)
 }
 
 // Команда для отправки изображения в ChatGPT
@@ -869,6 +913,8 @@ pub fn run() {
             get_translation_hotkey,
             save_last_route,
             get_last_route,
+            save_openai_api_key,
+            get_openai_api_key,
             send_to_chatgpt
         ])
         .run(tauri::generate_context!())
