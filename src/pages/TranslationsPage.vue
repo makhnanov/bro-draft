@@ -339,7 +339,6 @@ async function testCapture() {
   display flex
   flex-direction column
   gap 30px
-  max-width 800px
 
 .settings-section,
 .hotkey-section,
