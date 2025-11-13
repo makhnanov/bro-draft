@@ -113,19 +113,25 @@ async function saveHotkey(hotkey: string) {
 async function captureScreenshot() {
   try {
     isProcessing.value = true;
+    console.log('Starting area screenshot capture...');
 
     // Слушаем событие с выбранной областью
     const unlisten = await listen('area-selected', async (event: any) => {
+      console.log('Received area-selected event:', event.payload);
       const { x, y, width, height } = event.payload;
 
       try {
+        // Окна уже закрыты в handle_area_selection
+        console.log('Capturing area screenshot...');
         // Создаем скриншот выбранной области
         const base64Image = await invoke<string>('capture_area_screenshot', { x, y, width, height });
+        console.log('Screenshot captured, length:', base64Image.length);
         screenshot.value = base64Image;
         showActionDialog.value = true;
+        console.log('Dialog shown');
       } catch (error) {
         console.error('Failed to capture area screenshot:', error);
-        alert('Ошибка при создании скриншота области');
+        alert('Ошибка при создании скриншота области: ' + error);
       } finally {
         isProcessing.value = false;
       }
@@ -133,14 +139,23 @@ async function captureScreenshot() {
       unlisten();
     });
 
-    // Открываем окно выбора области
-    await invoke('open_area_selector');
+    console.log('Listener registered, opening area selector...');
 
-    isProcessing.value = false;
+    // Открываем окно выбора области
+    try {
+      await invoke('open_area_selector');
+      console.log('Area selector opened');
+      isProcessing.value = false;
+    } catch (error) {
+      console.error('Failed to open area selector:', error);
+      alert('Ошибка при открытии окна выбора области: ' + error);
+      isProcessing.value = false;
+      unlisten();
+    }
 
   } catch (error) {
-    console.error('Failed to open area selector:', error);
-    alert('Ошибка при открытии окна выбора области');
+    console.error('Unexpected error in captureScreenshot:', error);
+    alert('Неожиданная ошибка: ' + error);
     isProcessing.value = false;
   }
 }
@@ -250,7 +265,7 @@ async function testCapture() {
     <!-- Диалог выбора действия -->
     <div v-if="showActionDialog" class="dialog-overlay" @click="closeDialog">
       <div class="dialog" @click.stop>
-        <h2>Что сделать со скриншотом?</h2>
+        <h2>Выбранная область</h2>
         <div class="dialog-preview">
           <img v-if="screenshot" :src="`data:image/png;base64,${screenshot}`" alt="Screenshot" />
         </div>
@@ -260,7 +275,7 @@ async function testCapture() {
             class="btn btn-primary"
             :disabled="isProcessing"
           >
-            {{ isProcessing ? 'Обработка...' : 'Перевести' }}
+            {{ isProcessing ? 'Обработка...' : 'Распознать и перевести' }}
           </button>
           <button @click="closeDialog" class="btn btn-secondary">
             Отмена

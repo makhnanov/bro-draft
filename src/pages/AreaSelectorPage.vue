@@ -2,7 +2,6 @@
 import { ref, onMounted, computed } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import { emit } from '@tauri-apps/api/event';
 
 const isSelecting = ref(false);
 const startX = ref(0);
@@ -20,17 +19,7 @@ onMounted(async () => {
 
   const currentWin = getCurrentWindow();
 
-  // Делаем окно полноэкранным
-  try {
-    await currentWin.setFullscreen(true);
-    await currentWin.setAlwaysOnTop(true);
-  } catch (error) {
-    console.error('Error setting window properties:', error);
-  }
-
-  // Слушаем escape для закрытия
-  document.addEventListener('keydown', handleEscape);
-
+  // Окно уже создано в полноэкранном режиме в Rust, только устанавливаем фокус
   // Устанавливаем фокус на окно и wrapper
   setTimeout(async () => {
     try {
@@ -43,7 +32,7 @@ onMounted(async () => {
     } catch (error) {
       console.error('Error setting focus:', error);
     }
-  }, 200);
+  }, 100);
 
   // Получаем скриншот из state
   try {
@@ -85,30 +74,26 @@ async function handleMouseUp() {
   const width = Math.abs(currentX.value - startX.value);
   const height = Math.abs(currentY.value - startY.value);
 
+  console.log('Mouse up - selection:', { x, y, width, height });
+
   // Минимальный размер области
   if (width < 10 || height < 10) {
+    console.log('Selection too small, ignoring');
     isSelecting.value = false;
     return;
   }
 
-  // Отправляем событие с координатами
+  // Вызываем команду Rust для обработки выбора области
+  // Она закроет все окна и отправит событие в главное окно
   try {
-    await emit('area-selected', { x, y, width, height });
-
-    // Закрываем окно выбора
-    const currentWin = getCurrentWindow();
-    await currentWin.close();
+    console.log('Calling handle_area_selection...');
+    await invoke('handle_area_selection', { x, y, width, height });
+    console.log('handle_area_selection completed');
   } catch (error) {
-    console.error('Failed to send selection:', error);
+    console.error('Failed to handle selection:', error);
   }
 }
 
-function handleEscape(event: KeyboardEvent) {
-  if (event.key === 'Escape') {
-    // Отменяем выбор и закрываем окно
-    getCurrentWindow().close();
-  }
-}
 
 function handleImageError() {
   alert('Ошибка загрузки изображения скриншота');
@@ -135,7 +120,6 @@ const selectionStyle = computed(() => {
   <div
     class="area-selector-wrapper"
     tabindex="0"
-    @keydown="handleEscape"
     ref="wrapperRef"
   >
     <!-- Индикатор загрузки -->

@@ -376,22 +376,19 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
         .transparent(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .visible(false) // Сначала скрываем
+        .visible(true)
         .resizable(false)
-        .fullscreen(true) // Полноэкранный режим
         .build()
         .map_err(|e| format!("Failed to create area selector window {}: {}", index, e))?;
 
         println!("Window {} created for monitor {}", window_label, index);
 
-        // Даём время на загрузку страницы
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        // Переводим окно в полноэкранный режим после создания
+        webview_window.set_fullscreen(true)
+            .map_err(|e| format!("Failed to set fullscreen for window {}: {}", index, e))?;
 
-        // Устанавливаем полноэкранный режим и показываем окно
-        let _ = webview_window.set_fullscreen(true);
         let _ = webview_window.set_always_on_top(true);
         let _ = webview_window.set_focus();
-        let _ = webview_window.show();
 
         println!("Window {} shown in fullscreen for monitor {}", window_label, index);
     }
@@ -421,6 +418,54 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
             println!("ESC shortcut already registered or failed: {}", e);
             // Не возвращаем ошибку, так как это нормально если уже зарегистрирована
         }
+    }
+
+    Ok(())
+}
+
+// Команда для закрытия всех окон area-selector
+#[tauri::command]
+async fn close_all_area_selectors(app_handle: tauri::AppHandle) -> Result<(), String> {
+    println!("Closing all area-selector windows...");
+    let mut monitor_index = 0;
+    loop {
+        let window_label = format!("area-selector-{}", monitor_index);
+        if let Some(window) = app_handle.get_webview_window(&window_label) {
+            println!("Closing window: {}", window_label);
+            let _ = window.close();
+            monitor_index += 1;
+        } else {
+            break;
+        }
+    }
+    println!("All area-selector windows closed");
+    Ok(())
+}
+
+// Команда для обработки выбора области и отправки события в главное окно
+#[tauri::command]
+async fn handle_area_selection(app_handle: tauri::AppHandle, x: u32, y: u32, width: u32, height: u32) -> Result<(), String> {
+    use tauri::Emitter;
+
+    println!("Handling area selection: x={}, y={}, width={}, height={}", x, y, width, height);
+
+    // Закрываем все окна area-selector
+    close_all_area_selectors(app_handle.clone()).await?;
+
+    // Отправляем событие в главное окно
+    if let Some(main_window) = app_handle.get_webview_window("main") {
+        println!("Emitting area-selected event to main window...");
+        let payload = serde_json::json!({
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height
+        });
+        main_window.emit("area-selected", payload)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+        println!("Event emitted successfully");
+    } else {
+        return Err("Main window not found".to_string());
     }
 
     Ok(())
@@ -818,6 +863,8 @@ pub fn run() {
             open_area_selector,
             get_stored_screenshot,
             capture_area_screenshot,
+            close_all_area_selectors,
+            handle_area_selection,
             save_translation_hotkey,
             get_translation_hotkey,
             save_last_route,
