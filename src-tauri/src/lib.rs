@@ -788,6 +788,22 @@ pub fn run() {
                         _ => {}
                     }
                 });
+
+                // Периодически проверяем состояние DevTools и сохраняем
+                let window_clone = window.clone();
+                std::thread::spawn(move || {
+                    let mut last_state = window_clone.is_devtools_open();
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        let current_state = window_clone.is_devtools_open();
+                        if current_state != last_state {
+                            let mut state = load_state();
+                            state.devtools_open = current_state;
+                            save_state(&state);
+                            last_state = current_state;
+                        }
+                    }
+                });
             }
 
             Ok(())
