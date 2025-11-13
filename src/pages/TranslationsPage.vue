@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 const apiKey = ref('');
 const currentHotkey = ref<string | null>(null);
@@ -114,7 +115,6 @@ async function captureScreenshot() {
     isProcessing.value = true;
 
     // Слушаем событие с выбранной областью
-    const { listen } = await import('@tauri-apps/api/event');
     const unlisten = await listen('area-selected', async (event: any) => {
       const { x, y, width, height } = event.payload;
 

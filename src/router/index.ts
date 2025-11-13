@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { invoke } from '@tauri-apps/api/core'
 import HomePage from '../pages/HomePage.vue'
 import AliasesPage from '../pages/AliasesPage.vue'
 import RecognitionPage from '../pages/RecognitionPage.vue'
@@ -66,6 +67,37 @@ const routes = [
 const router = createRouter({
   history: createWebHashHistory(),
   routes
+})
+
+// Флаг для предотвращения сохранения при первой загрузке
+let isInitialLoad = true
+
+// Восстанавливаем последний маршрут при загрузке
+router.isReady().then(async () => {
+  try {
+    const lastRoute = await invoke<string | null>('get_last_route')
+    if (lastRoute && lastRoute !== '/' && router.currentRoute.value.path === '/') {
+      console.log('Restoring last route:', lastRoute)
+      await router.push(lastRoute)
+    }
+  } catch (err) {
+    console.error('Failed to get last route:', err)
+  } finally {
+    // Снимаем флаг после восстановления маршрута
+    setTimeout(() => {
+      isInitialLoad = false
+    }, 100)
+  }
+})
+
+// Сохраняем маршрут при каждом переходе (кроме начальной загрузки)
+router.afterEach((to) => {
+  // Не сохраняем маршрут при начальной загрузке и area-selector
+  if (!isInitialLoad && to.path !== '/area-selector') {
+    invoke('save_last_route', { route: to.path }).catch(err => {
+      console.error('Failed to save route:', err)
+    })
+  }
 })
 
 export default router

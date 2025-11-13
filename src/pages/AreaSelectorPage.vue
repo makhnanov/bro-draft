@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-
-console.log('AreaSelectorPage script loaded');
+import { invoke } from '@tauri-apps/api/core';
+import { emit } from '@tauri-apps/api/event';
 
 const isSelecting = ref(false);
 const startX = ref(0);
@@ -14,42 +14,31 @@ const isLoading = ref(true);
 const wrapperRef = ref<HTMLElement | null>(null);
 
 onMounted(async () => {
-  console.log('=== AreaSelectorPage onMounted START ===');
-  console.log('Current URL:', window.location.href);
-  console.log('Current path:', window.location.hash);
-
   // Получаем индекс монитора из URL
   const urlParams = new URLSearchParams(window.location.hash.split('?')[1]);
   const monitorIndex = parseInt(urlParams.get('monitor') || '0', 10);
-  console.log('Monitor index:', monitorIndex);
 
   const currentWin = getCurrentWindow();
-  console.log('Got current window');
 
   // Делаем окно полноэкранным
   try {
     await currentWin.setFullscreen(true);
-    console.log('Set fullscreen');
     await currentWin.setAlwaysOnTop(true);
-    console.log('Set always on top');
   } catch (error) {
     console.error('Error setting window properties:', error);
   }
 
   // Слушаем escape для закрытия
   document.addEventListener('keydown', handleEscape);
-  console.log('Added escape listener');
 
   // Устанавливаем фокус на окно и wrapper
   setTimeout(async () => {
     try {
       await currentWin.setFocus();
-      console.log('Set window focus');
 
       // Устанавливаем фокус на wrapper элемент
       if (wrapperRef.value) {
         wrapperRef.value.focus();
-        console.log('Wrapper focused');
       }
     } catch (error) {
       console.error('Error setting focus:', error);
@@ -58,29 +47,20 @@ onMounted(async () => {
 
   // Получаем скриншот из state
   try {
-    console.log('About to request screenshot from state for monitor', monitorIndex);
-    const { invoke } = await import('@tauri-apps/api/core');
-    console.log('invoke imported, calling get_stored_screenshot...');
-
     const screenshotData = await invoke<string>('get_stored_screenshot', { monitorIndex });
-    console.log('Screenshot loaded from state, length:', screenshotData ? screenshotData.length : 'null');
 
     if (screenshotData && screenshotData.length > 0) {
       screenshot.value = screenshotData;
-      console.log('Screenshot set successfully');
     } else {
       console.error('Screenshot is empty or null');
     }
 
     isLoading.value = false;
-    console.log('Loading set to false');
   } catch (error) {
     console.error('Failed to get screenshot:', error);
     alert('Ошибка загрузки скриншота: ' + error);
     isLoading.value = false;
   }
-
-  console.log('=== AreaSelectorPage onMounted END ===');
 });
 
 function handleMouseDown(event: MouseEvent) {
@@ -113,7 +93,6 @@ async function handleMouseUp() {
 
   // Отправляем событие с координатами
   try {
-    const { emit } = await import('@tauri-apps/api/event');
     await emit('area-selected', { x, y, width, height });
 
     // Закрываем окно выбора
@@ -131,8 +110,7 @@ function handleEscape(event: KeyboardEvent) {
   }
 }
 
-function handleImageError(event: Event) {
-  console.error('Failed to load screenshot image:', event);
+function handleImageError() {
   alert('Ошибка загрузки изображения скриншота');
 }
 

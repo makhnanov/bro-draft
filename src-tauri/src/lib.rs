@@ -15,6 +15,7 @@ struct AppState {
     window_width: Option<u32>,
     window_height: Option<u32>,
     translation_hotkey: Option<String>,
+    last_route: Option<String>,
 }
 
 impl Default for AppState {
@@ -26,6 +27,7 @@ impl Default for AppState {
             window_width: None,
             window_height: None,
             translation_hotkey: None,
+            last_route: Some("/".to_string()),
         }
     }
 }
@@ -499,6 +501,24 @@ fn get_translation_hotkey() -> Result<Option<String>, String> {
     Ok(state.translation_hotkey)
 }
 
+// Команда для сохранения последнего маршрута
+#[tauri::command]
+fn save_last_route(route: String) -> Result<(), String> {
+    let mut state = load_state();
+    state.last_route = Some(route.clone());
+    save_state(&state);
+    println!("Last route saved: {}", route);
+    Ok(())
+}
+
+// Команда для получения последнего маршрута
+#[tauri::command]
+fn get_last_route() -> Result<Option<String>, String> {
+    let state = load_state();
+    println!("Last route loaded: {:?}", state.last_route);
+    Ok(state.last_route)
+}
+
 // Команда для отправки изображения в ChatGPT
 #[tauri::command]
 async fn send_to_chatgpt(api_key: String, image_base64: String, prompt: String) -> Result<String, String> {
@@ -754,14 +774,12 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     match event {
                         tauri::WindowEvent::Moved(position) => {
-                            println!("Window moved to: x={}, y={}", position.x, position.y);
                             let mut state = load_state();
                             state.window_x = Some(position.x);
                             state.window_y = Some(position.y);
                             save_state(&state);
                         }
                         tauri::WindowEvent::Resized(size) => {
-                            println!("Window resized to: {}x{}", size.width, size.height);
                             let mut state = load_state();
                             state.window_width = Some(size.width);
                             state.window_height = Some(size.height);
@@ -784,6 +802,8 @@ pub fn run() {
             capture_area_screenshot,
             save_translation_hotkey,
             get_translation_hotkey,
+            save_last_route,
+            get_last_route,
             send_to_chatgpt
         ])
         .run(tauri::generate_context!())
