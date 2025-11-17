@@ -177,7 +177,7 @@ async function closeApp() {
     padding 12px 20px
     color rgba(255, 255, 255, 0.8)
     text-decoration none
-    font-size 20px
+    font-size 14px
     font-weight 500
     transition all 0.2s ease
     position relative

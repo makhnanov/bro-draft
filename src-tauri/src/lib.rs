@@ -400,33 +400,6 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
         println!("Window {} shown in fullscreen for monitor {}", window_label, index);
     }
 
-    // Регистрируем глобальную горячую клавишу ESC для закрытия всех окон (если ещё не зарегистрирована)
-    let app_clone = app_handle.clone();
-    let register_result = app_handle.global_shortcut().on_shortcut("Escape", move |_app, _shortcut, event| {
-        if event.state == ShortcutState::Pressed {
-            println!("ESC shortcut pressed! Closing all area-selector windows");
-            let mut monitor_idx = 0;
-            loop {
-                let window_label = format!("area-selector-{}", monitor_idx);
-                if let Some(win) = app_clone.get_webview_window(&window_label) {
-                    println!("Closing window: {}", window_label);
-                    let _ = win.close();
-                    monitor_idx += 1;
-                } else {
-                    break;
-                }
-            }
-        }
-    });
-
-    match register_result {
-        Ok(_) => println!("ESC shortcut registered for all area-selector windows"),
-        Err(e) => {
-            println!("ESC shortcut already registered or failed: {}", e);
-            // Не возвращаем ошибку, так как это нормально если уже зарегистрирована
-        }
-    }
-
     Ok(())
 }
 
@@ -895,6 +868,27 @@ pub fn run() {
                         }
                     }
                 });
+
+                // Отключаем зум в WebView2
+                #[cfg(target_os = "windows")]
+                {
+                    println!("Disabling zoom in WebView2...");
+                    let _ = window.with_webview(|webview| {
+                        #[cfg(target_os = "windows")]
+                        unsafe {
+                            use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
+                            use windows::core::Interface;
+
+                            let controller = webview.controller();
+                            if let Ok(controller) = controller.cast::<ICoreWebView2Controller>() {
+                                // Устанавливаем зум на 1.0 и блокируем его изменение
+                                let _ = controller.SetZoomFactor(1.0);
+                                println!("Zoom factor set to 1.0");
+                            }
+                        }
+                        Ok(())
+                    });
+                }
             }
 
             Ok(())

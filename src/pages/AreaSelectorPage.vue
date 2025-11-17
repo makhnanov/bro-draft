@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -13,12 +13,34 @@ const isLoading = ref(true);
 const wrapperRef = ref<HTMLElement | null>(null);
 const monitorIndex = ref(0);
 
+// Функция для закрытия всех окон area-selector
+async function handleEscapeKey() {
+  console.log('ESC pressed, closing all area-selector windows');
+  try {
+    await invoke('close_all_area_selectors');
+  } catch (error) {
+    console.error('Failed to close area-selector windows:', error);
+  }
+}
+
+// Обработчик клавиш
+let keydownHandler: ((event: KeyboardEvent) => void) | null = null;
+
 onMounted(async () => {
   // Получаем индекс монитора из URL
   const urlParams = new URLSearchParams(window.location.hash.split('?')[1]);
   monitorIndex.value = parseInt(urlParams.get('monitor') || '0', 10);
 
   const currentWin = getCurrentWindow();
+
+  // Добавляем обработчик ESC клавиши
+  keydownHandler = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      handleEscapeKey();
+    }
+  };
+  window.addEventListener('keydown', keydownHandler);
 
   // Окно уже создано в полноэкранном режиме в Rust, только устанавливаем фокус
   // Устанавливаем фокус на окно и wrapper
@@ -50,6 +72,13 @@ onMounted(async () => {
     console.error('Failed to get screenshot:', error);
     alert('Ошибка загрузки скриншота: ' + error);
     isLoading.value = false;
+  }
+});
+
+onBeforeUnmount(() => {
+  // Удаляем обработчик клавиш
+  if (keydownHandler) {
+    window.removeEventListener('keydown', keydownHandler);
   }
 });
 
