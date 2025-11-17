@@ -9,8 +9,10 @@ import AutomatizationPage from '../pages/AutomatizationPage.vue'
 import CirclePage from '../pages/CirclePage.vue'
 import TestPage from '../pages/TestPage.vue'
 import YouTubePage from '../pages/YouTubePage.vue'
+import EditorPage from '../pages/EditorPage.vue'
 import TranslationsPage from '../pages/TranslationsPage.vue'
 import AreaSelectorPage from '../pages/AreaSelectorPage.vue'
+import SettingsPage from '../pages/SettingsPage.vue'
 
 const routes = [
   {
@@ -59,6 +61,11 @@ const routes = [
     component: YouTubePage
   },
   {
+    path: '/editor',
+    name: 'Editor',
+    component: EditorPage
+  },
+  {
     path: '/translations',
     name: 'Translations',
     component: TranslationsPage
@@ -67,6 +74,11 @@ const routes = [
     path: '/area-selector',
     name: 'AreaSelector',
     component: AreaSelectorPage
+  },
+  {
+    path: '/settings',
+    name: 'Settings',
+    component: SettingsPage
   }
 ]
 
