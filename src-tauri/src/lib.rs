@@ -668,6 +668,139 @@ async fn type_text(text: String) -> Result<(), String> {
     Ok(())
 }
 
+// Команда для открытия терминала с SSH командой
+#[tauri::command]
+async fn open_terminal(command: String) -> Result<(), String> {
+    use tokio::process::Command;
+
+    println!("Opening terminal with command: {}", command);
+
+    #[cfg(target_os = "linux")]
+    {
+        // Создаем команды заранее для правильного времени жизни
+        let cmd1 = format!("{}; exec bash", command);
+        let cmd2 = format!("bash -c '{}; exec bash'", command);
+
+        // Пробуем разные терминалы Linux
+        let terminals: Vec<(&str, Vec<&str>)> = vec![
+            ("gnome-terminal", vec!["--", "bash", "-c", &cmd1]),
+            ("konsole", vec!["-e", "bash", "-c", &cmd1]),
+            ("xfce4-terminal", vec!["-e", &cmd2]),
+            ("xterm", vec!["-e", &cmd2]),
+        ];
+
+        for (terminal, args) in terminals {
+            match Command::new(terminal)
+                .args(&args)
+                .spawn()
+            {
+                Ok(_) => {
+                    println!("Successfully opened {} terminal", terminal);
+                    return Ok(());
+                }
+                Err(_) => continue,
+            }
+        }
+
+        return Err("No terminal emulator found. Please install gnome-terminal, konsole, xfce4-terminal, or xterm.".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows Terminal или CMD
+        match Command::new("cmd")
+            .args(&["/c", "start", "cmd", "/k", &command])
+            .spawn()
+        {
+            Ok(_) => {
+                println!("Successfully opened Windows terminal");
+                return Ok(());
+            }
+            Err(e) => return Err(format!("Failed to open terminal: {}", e)),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // macOS Terminal
+        let script = format!(
+            r#"tell application "Terminal"
+                activate
+                do script "{}"
+            end tell"#,
+            command.replace("\"", "\\\"")
+        );
+
+        match Command::new("osascript")
+            .args(&["-e", &script])
+            .spawn()
+        {
+            Ok(_) => {
+                println!("Successfully opened macOS terminal");
+                return Ok(());
+            }
+            Err(e) => return Err(format!("Failed to open terminal: {}", e)),
+        }
+    }
+}
+
+// Команда для конвертации видео в MP4
+#[tauri::command]
+async fn convert_to_mp4(input_path: String) -> Result<String, String> {
+    use tokio::process::Command;
+    use std::path::Path;
+
+    println!("Converting to MP4: {}", input_path);
+
+    // Проверяем что файл существует
+    if !Path::new(&input_path).exists() {
+        return Err("Входной файл не найден".to_string());
+    }
+
+    // Генерируем путь для выходного файла
+    let input_path_obj = Path::new(&input_path);
+    let output_path = input_path_obj
+        .with_extension("mp4")
+        .to_string_lossy()
+        .to_string();
+
+    println!("Output path: {}", output_path);
+
+    // Проверяем наличие ffmpeg
+    let ffmpeg_check = Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .await;
+
+    if ffmpeg_check.is_err() {
+        return Err("FFmpeg не установлен. Установите FFmpeg для конвертации видео.".to_string());
+    }
+
+    // Запускаем конвертацию
+    let output = Command::new("ffmpeg")
+        .args(&[
+            "-i", &input_path,
+            "-c:v", "libx264",    // H.264 видео кодек
+            "-crf", "23",         // Качество (0-51, меньше = лучше)
+            "-c:a", "aac",        // AAC аудио кодек
+            "-b:a", "192k",       // Битрейт аудио
+            "-y",                 // Перезаписать без запроса
+            &output_path
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Ошибка запуска FFmpeg: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        println!("FFmpeg error: {}", stderr);
+        return Err(format!("Ошибка конвертации: {}", stderr));
+    }
+
+    println!("Conversion completed successfully");
+    Ok(output_path)
+}
+
 // Wait for dev server to be ready
 fn wait_for_dev_server(url: &str, max_attempts: u32) -> bool {
     for attempt in 1..=max_attempts {
@@ -700,6 +833,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(ScreenshotState {
             data: Mutex::new(HashMap::new()),
         })
@@ -938,7 +1072,9 @@ pub fn run() {
             save_openai_api_key,
             get_openai_api_key,
             send_to_chatgpt,
-            type_text
+            type_text,
+            open_terminal,
+            convert_to_mp4
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

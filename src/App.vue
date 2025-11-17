@@ -75,6 +75,17 @@ async function closeApp() {
         </svg>
         <span class="nav-text">Converters</span>
       </router-link>
+      <router-link to="/shell" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <rect x="2" y="3" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+          <line x1="8" y1="21" x2="16" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="12" y1="17" x2="12" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="7" y1="7" x2="7" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="11" y1="7" x2="11" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="15" y1="7" x2="15" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="nav-text">Shell</span>
+      </router-link>
       <router-link to="/automatization" class="nav-item">
         <svg viewBox="0 0 24 24" class="nav-icon">
           <rect x="2" y="6" width="20" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>

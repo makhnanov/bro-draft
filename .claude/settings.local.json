@@ -5,7 +5,10 @@
       "Bash(cargo build:*)",
       "Bash(chmod:*)",
       "Bash(sudo apt-get update:*)",
-      "Bash(sudo apt-get install:*)"
+      "Bash(sudo apt-get install:*)",
+      "Bash(npm install)",
+      "Bash(ffmpeg:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

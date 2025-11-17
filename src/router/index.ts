@@ -5,6 +5,7 @@ import AliasesPage from '../pages/AliasesPage.vue'
 import RecognitionPage from '../pages/RecognitionPage.vue'
 import WatcherPage from '../pages/WatcherPage.vue'
 import ConvertersPage from '../pages/ConvertersPage.vue'
+import ShellPage from '../pages/ShellPage.vue'
 import AutomatizationPage from '../pages/AutomatizationPage.vue'
 import CirclePage from '../pages/CirclePage.vue'
 import TestPage from '../pages/TestPage.vue'
@@ -39,6 +40,11 @@ const routes = [
     path: '/converters',
     name: 'Converters',
     component: ConvertersPage
+  },
+  {
+    path: '/shell',
+    name: 'Shell',
+    component: ShellPage
   },
   {
     path: '/automatization',
