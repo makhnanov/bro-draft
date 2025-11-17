@@ -120,165 +120,165 @@ async function closeApp() {
 <style scoped lang="stylus">
 // Боковое меню в стиле JIRA
 .sidebar
-  position fixed
-  left 0
-  top 0
-  bottom 0
-  width 240px
-  background linear-gradient(180deg, #0747a6 0%, #0052cc 100%)
-  box-shadow 2px 0 8px rgba(0, 0, 0, 0.15)
-  transition width 0.3s ease
-  z-index 999
-  display flex
-  flex-direction column
+    position fixed
+    left 0
+    top 0
+    bottom 0
+    width 240px
+    background linear-gradient(180deg, #0747a6 0%, #0052cc 100%)
+    box-shadow 2px 0 8px rgba(0, 0, 0, 0.15)
+    transition width 0.3s ease
+    z-index 999
+    display flex
+    flex-direction column
 
-  &.collapsed
-    width 64px
+    &.collapsed
+        width 64px
 
-    .nav-icon
-      margin-right 0
+        .nav-icon
+            margin-right 0
 
-    .nav-text
-      opacity 0
-      width 0
-      overflow hidden
+        .nav-text
+            opacity 0
+            width 0
+            overflow hidden
 
-    ~ .main-content
-      margin-left 64px
+        ~ .main-content
+            margin-left 64px
 
 .sidebar-toggle
-  width 100%
-  height 64px
-  background transparent
-  border none
-  cursor pointer
-  display flex
-  align-items center
-  justify-content center
-  color #ffffff
-  transition background-color 0.2s ease
-  border-bottom 1px solid rgba(255, 255, 255, 0.1)
+    width 100%
+    height 64px
+    background transparent
+    border none
+    cursor pointer
+    display flex
+    align-items center
+    justify-content center
+    color #ffffff
+    transition background-color 0.2s ease
+    border-bottom 1px solid rgba(255, 255, 255, 0.1)
 
-  &:hover
-    background-color rgba(255, 255, 255, 0.1)
+    &:hover
+        background-color rgba(255, 255, 255, 0.1)
 
 .toggle-icon
-  width 24px
-  height 24px
+    width 24px
+    height 24px
 
 .sidebar-nav
-  flex 1
-  padding 16px 0
-  overflow-y auto
+    flex 1
+    padding 16px 0
+    overflow-y auto
 
 .nav-item
-  display flex
-  align-items center
-  padding 12px 20px
-  color rgba(255, 255, 255, 0.8)
-  text-decoration none
-  font-size 14px
-  font-weight 500
-  transition all 0.2s ease
-  position relative
-  white-space nowrap
+    display flex
+    align-items center
+    padding 12px 20px
+    color rgba(255, 255, 255, 0.8)
+    text-decoration none
+    font-size 20px
+    font-weight 500
+    transition all 0.2s ease
+    position relative
+    white-space nowrap
 
-  &:hover
-    background-color rgba(255, 255, 255, 0.1)
-    color #ffffff
+    &:hover
+        background-color rgba(255, 255, 255, 0.1)
+        color #ffffff
 
-  &.router-link-active
-    background-color rgba(255, 255, 255, 0.15)
-    color #ffffff
+    &.router-link-active
+        background-color rgba(255, 255, 255, 0.15)
+        color #ffffff
 
-    &::before
-      content ''
-      position absolute
-      left 0
-      top 0
-      bottom 0
-      width 3px
-      background-color #ffffff
+        &::before
+            content ''
+            position absolute
+            left 0
+            top 0
+            bottom 0
+            width 3px
+            background-color #ffffff
 
 .nav-icon
-  width 20px
-  height 20px
-  min-width 20px
-  margin-right 12px
+    width 20px
+    height 20px
+    min-width 20px
+    margin-right 12px
 
 .nav-text
-  opacity 1
-  transition opacity 0.2s ease
+    opacity 1
+    transition opacity 0.2s ease
 
 .close-button
-  position fixed
-  top 16px
-  right 16px
-  width 40px
-  height 40px
-  background-color #dc3545
-  border none
-  border-radius 8px 8px 8px 0px
-  cursor pointer
-  display flex
-  align-items center
-  justify-content center
-  padding 0
-  transition all 0.2s ease
-  box-shadow 0 2px 8px rgba(220, 53, 69, 0.3)
-  z-index 1000
+    position fixed
+    top 16px
+    right 16px
+    width 40px
+    height 40px
+    background-color #dc3545
+    border none
+    border-radius 8px 8px 8px 0px
+    cursor pointer
+    display flex
+    align-items center
+    justify-content center
+    padding 0
+    transition all 0.2s ease
+    box-shadow 0 2px 8px rgba(220, 53, 69, 0.3)
+    z-index 1000
 
-  &:hover
-    background-color #c82333
-    box-shadow 0 4px 12px rgba(220, 53, 69, 0.5)
-    transform scale(1.05)
+    &:hover
+        background-color #c82333
+        box-shadow 0 4px 12px rgba(220, 53, 69, 0.5)
+        transform scale(1.05)
 
-  &:active
-    transform scale(0.95)
+    &:active
+        transform scale(0.95)
 
 .close-icon
-  width 20px
-  height 20px
+    width 20px
+    height 20px
 
 .main-content
-  margin-left 240px
-  // padding 120px 20px 20px 20px
-  transition margin-left 0.3s ease
-  min-height 100vh
+    margin-left 240px
+    // padding 120px 20px 20px 20px
+    transition margin-left 0.3s ease
+    min-height 100vh
 
-  &.fullscreen
-    margin-left 0
-    position fixed
-    top 0
-    left 0
-    width 100vw
-    height 100vh
-    z-index 99999
+    &.fullscreen
+        margin-left 0
+        position fixed
+        top 0
+        left 0
+        width 100vw
+        height 100vh
+        z-index 99999
 </style>
 <style lang="stylus">
 *
-  margin 0
-  padding 0
-  box-sizing border-box
+    margin 0
+    padding 0
+    box-sizing border-box
 
 :root
-  font-family Inter, Avenir, Helvetica, Arial, sans-serif
-  font-size 16px
-  color #0f0f0f
-  background-color #f6f6f6
-  font-synthesis none
-  text-rendering optimizeLegibility
-  -webkit-font-smoothing antialiased
-  -moz-osx-font-smoothing grayscale
-  -webkit-text-size-adjust 100%
+    font-family Inter, Avenir, Helvetica, Arial, sans-serif
+    font-size 16px
+    color #0f0f0f
+    background-color #f6f6f6
+    font-synthesis none
+    text-rendering optimizeLegibility
+    -webkit-font-smoothing antialiased
+    -moz-osx-font-smoothing grayscale
+    -webkit-text-size-adjust 100%
 
 html, body
-  width 100%
-  height 100%
-  overflow hidden
+    width 100%
+    height 100%
+    overflow hidden
 
 @media (prefers-color-scheme: dark)
-  :root
-    color #f6f6f6
-    background-color #2f2f2f
+    :root
+        color #f6f6f6
+        background-color #2f2f2f
 </style>
