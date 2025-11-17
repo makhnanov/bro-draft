@@ -5,12 +5,17 @@ import { useRoute } from "vue-router";
 
 const route = useRoute();
 const isSidebarCollapsed = ref(false);
+const toggleText = ref('BroLauncher');
 
 // Проверяем, является ли текущая страница area-selector
 const isAreaSelector = computed(() => route.path === '/area-selector');
 
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
+  // Меняем текст только при разворачивании меню (когда текст становится видимым)
+  if (!isSidebarCollapsed.value) {
+    toggleText.value = toggleText.value === 'BroLauncher' ? 'Multitool' : 'BroLauncher';
+  }
 }
 
 async function closeApp() {
@@ -28,7 +33,7 @@ async function closeApp() {
           <line x1="3" y1="6" x2="21" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           <line x1="3" y1="18" x2="21" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <span class="toggle-text">BroLauncher</span>
+        <span class="toggle-text">{{ toggleText }}</span>
       </div>
     </button>
 
