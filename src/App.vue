@@ -22,11 +22,14 @@ async function closeApp() {
   <!-- Боковое меню в стиле JIRA (скрываем для area-selector) -->
   <div v-if="!isAreaSelector" :class="['sidebar', { collapsed: isSidebarCollapsed }]">
     <button class="sidebar-toggle" @click="toggleSidebar">
-      <svg viewBox="0 0 24 24" class="toggle-icon">
-        <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <line x1="3" y1="6" x2="21" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <line x1="3" y1="18" x2="21" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
+      <div class="toggle-content">
+        <svg viewBox="0 0 24 24" class="toggle-icon">
+          <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="3" y1="6" x2="21" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="3" y1="18" x2="21" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="toggle-text">BroLauncher</span>
+      </div>
     </button>
 
     <nav class="sidebar-nav">
@@ -135,6 +138,9 @@ async function closeApp() {
     &.collapsed
         width 64px
 
+        .sidebar-toggle
+            justify-content center
+
         .nav-icon
             margin-right 0
 
@@ -142,6 +148,11 @@ async function closeApp() {
             opacity 0
             width 0
             overflow hidden
+
+        .toggle-text
+            opacity 0
+            width 0
+            margin-left 0
 
         ~ .main-content
             margin-left 64px
@@ -154,7 +165,8 @@ async function closeApp() {
     cursor pointer
     display flex
     align-items center
-    justify-content center
+    justify-content flex-start
+    padding 0 20px
     color #ffffff
     transition background-color 0.2s ease
     border-bottom 1px solid rgba(255, 255, 255, 0.1)
@@ -162,9 +174,26 @@ async function closeApp() {
     &:hover
         background-color rgba(255, 255, 255, 0.1)
 
+.toggle-content
+    display flex
+    align-items center
+    justify-content flex-start
+    width 100%
+
 .toggle-icon
     width 24px
     height 24px
+    min-width 24px
+    flex-shrink 0
+
+.toggle-text
+    margin-left 12px
+    font-size 18px
+    font-weight 600
+    white-space nowrap
+    overflow hidden
+    opacity 1
+    transition opacity 0.3s ease, width 0.3s ease, margin-left 0.3s ease
 
 .sidebar-nav
     flex 1
@@ -262,7 +291,7 @@ async function closeApp() {
     box-sizing border-box
 
 :root
-    font-family Inter, Avenir, Helvetica, Arial, sans-serif
+    font-family -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif
     font-size 16px
     color #0f0f0f
     background-color #f6f6f6
