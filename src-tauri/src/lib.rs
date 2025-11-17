@@ -640,6 +640,34 @@ async fn send_to_chatgpt(api_key: String, image_base64: String, prompt: String) 
     Ok(content)
 }
 
+// Команда для эмуляции нажатий клавиш
+#[tauri::command]
+async fn type_text(text: String) -> Result<(), String> {
+    use enigo::{Enigo, Keyboard, Settings};
+
+    println!("Starting to type text: {}", text);
+
+    // Создаём enigo в отдельном потоке, так как он требует синхронного API
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let mut enigo = Enigo::new(&Settings::default())
+            .map_err(|e| format!("Failed to create Enigo: {:?}", e))?;
+
+        // Небольшая задержка между символами для надёжности
+        for ch in text.chars() {
+            enigo.text(&ch.to_string())
+                .map_err(|e| format!("Failed to type character '{}': {:?}", ch, e))?;
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        println!("Finished typing text");
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
+
+    Ok(())
+}
+
 // Wait for dev server to be ready
 fn wait_for_dev_server(url: &str, max_attempts: u32) -> bool {
     for attempt in 1..=max_attempts {
@@ -909,7 +937,8 @@ pub fn run() {
             get_last_route,
             save_openai_api_key,
             get_openai_api_key,
-            send_to_chatgpt
+            send_to_chatgpt,
+            type_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

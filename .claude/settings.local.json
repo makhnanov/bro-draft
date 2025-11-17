@@ -3,7 +3,9 @@
     "allow": [
       "Bash(make start-development:*)",
       "Bash(cargo build:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(sudo apt-get update:*)",
+      "Bash(sudo apt-get install:*)"
     ],
     "deny": [],
     "ask": []
