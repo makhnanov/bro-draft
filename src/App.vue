@@ -76,6 +76,12 @@ async function closeApp() {
         </svg>
         <span class="nav-text">Automatization</span>
       </router-link>
+      <router-link to="/circle" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <span class="nav-text">Circle</span>
+      </router-link>
       <router-link to="/test" class="nav-item">
         <svg viewBox="0 0 24 24" class="nav-icon">
           <path d="M9 11l3 3L22 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>

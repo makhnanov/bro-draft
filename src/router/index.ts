@@ -6,6 +6,7 @@ import RecognitionPage from '../pages/RecognitionPage.vue'
 import WatcherPage from '../pages/WatcherPage.vue'
 import ConvertersPage from '../pages/ConvertersPage.vue'
 import AutomatizationPage from '../pages/AutomatizationPage.vue'
+import CirclePage from '../pages/CirclePage.vue'
 import TestPage from '../pages/TestPage.vue'
 import YouTubePage from '../pages/YouTubePage.vue'
 import TranslationsPage from '../pages/TranslationsPage.vue'
@@ -41,6 +42,11 @@ const routes = [
     path: '/automatization',
     name: 'Automatization',
     component: AutomatizationPage
+  },
+  {
+    path: '/circle',
+    name: 'Circle',
+    component: CirclePage
   },
   {
     path: '/test',
