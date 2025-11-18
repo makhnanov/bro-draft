@@ -744,6 +744,119 @@ async fn open_terminal(command: String) -> Result<(), String> {
     }
 }
 
+// Структура для JetBrains проекта
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct JetBrainsProject {
+    ide_name: String,
+    ide_version: String,
+    project_path: String,
+    display_name: String,
+    frame_title: String,
+    activation_time: Option<String>,
+    exists: bool,
+}
+
+// Команда для получения списка проектов JetBrains
+#[tauri::command]
+async fn get_jetbrains_projects() -> Result<Vec<JetBrainsProject>, String> {
+    use tokio::process::Command;
+    use std::env;
+
+    println!("Getting JetBrains projects...");
+
+    // Получаем домашнюю директорию пользователя
+    let home_dir = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .map_err(|_| "Failed to get home directory".to_string())?;
+
+    // Создаем временный файл для JSON в home директории
+    let json_path = format!("{}/.cache/jetbrains_projects.json", home_dir);
+    let cache_dir = format!("{}/.cache", home_dir);
+
+    // Создаем директорию .cache если её нет
+    tokio::fs::create_dir_all(&cache_dir)
+        .await
+        .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+
+    println!("Using cache path: {}", json_path);
+
+    // Находим путь к Python скрипту
+    let script_path = if cfg!(debug_assertions) {
+        // В режиме разработки используем путь из исходников
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("jetbrains_projects.py")
+    } else {
+        // В production ищем скрипт рядом с исполняемым файлом
+        let exe_path = env::current_exe()
+            .map_err(|e| format!("Failed to get exe path: {}", e))?;
+        exe_path.parent()
+            .unwrap()
+            .join("jetbrains_projects.py")
+    };
+
+    println!("Using script path: {:?}", script_path);
+
+    // Запускаем Python скрипт
+    let output = Command::new("python3")
+        .arg(&script_path)
+        .env("JSON_OUTPUT_PATH", &json_path)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run script: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        println!("Script stderr: {}", stderr);
+        println!("Script stdout: {}", stdout);
+        return Err(format!("Script failed: {}", stderr));
+    }
+
+    // Читаем JSON файл
+    let json_content = tokio::fs::read_to_string(&json_path)
+        .await
+        .map_err(|e| format!("Failed to read JSON from {}: {}", json_path, e))?;
+
+    let projects: Vec<JetBrainsProject> = serde_json::from_str(&json_content)
+        .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+
+    println!("Found {} projects", projects.len());
+    Ok(projects)
+}
+
+// Команда для открытия проекта в JetBrains IDE
+#[tauri::command]
+async fn open_jetbrains_project(project_path: String, ide_name: String) -> Result<(), String> {
+    use tokio::process::Command;
+
+    println!("Opening project {} in {}", project_path, ide_name);
+
+    // Определяем команду запуска IDE
+    let ide_command = match ide_name.to_lowercase().as_str() {
+        "rider" => "rider",
+        "phpstorm" => "phpstorm",
+        "pycharm" => "pycharm",
+        "webstorm" => "webstorm",
+        "goland" => "goland",
+        "rustrover" => "rustrover",
+        "datagrip" => "datagrip",
+        "clion" => "clion",
+        "intellijidea" => "idea",
+        _ => return Err(format!("Unknown IDE: {}", ide_name)),
+    };
+
+    // Запускаем IDE с проектом
+    Command::new(ide_command)
+        .arg(&project_path)
+        .spawn()
+        .map_err(|e| format!("Failed to open project: {}", e))?;
+
+    println!("Project opened successfully");
+    Ok(())
+}
+
 // Команда для конвертации видео в MP4
 #[tauri::command]
 async fn convert_to_mp4(input_path: String) -> Result<String, String> {
@@ -1074,7 +1187,9 @@ pub fn run() {
             send_to_chatgpt,
             type_text,
             open_terminal,
-            convert_to_mp4
+            convert_to_mp4,
+            get_jetbrains_projects,
+            open_jetbrains_project
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

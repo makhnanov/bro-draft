@@ -14,6 +14,7 @@ import EditorPage from '../pages/EditorPage.vue'
 import TranslationsPage from '../pages/TranslationsPage.vue'
 import AreaSelectorPage from '../pages/AreaSelectorPage.vue'
 import SettingsPage from '../pages/SettingsPage.vue'
+import ProjectsPage from '../pages/ProjectsPage.vue'
 
 const routes = [
   {
@@ -85,6 +86,11 @@ const routes = [
     path: '/settings',
     name: 'Settings',
     component: SettingsPage
+  },
+  {
+    path: '/projects',
+    name: 'Projects',
+    component: ProjectsPage
   }
 ]
 
