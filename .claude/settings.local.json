@@ -10,7 +10,8 @@
       "Bash(ffmpeg:*)",
       "Bash(npm run build:*)",
       "Bash(python3:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []
