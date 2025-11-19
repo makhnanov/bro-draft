@@ -668,6 +668,26 @@ async fn type_text(text: String) -> Result<(), String> {
     Ok(())
 }
 
+// Команда для переключения DevTools
+#[tauri::command]
+fn toggle_devtools(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let is_open = window.is_devtools_open();
+        if is_open {
+            let _ = window.close_devtools();
+        } else {
+            let _ = window.open_devtools();
+        }
+        // Сохраняем новое состояние
+        let mut state = load_state();
+        state.devtools_open = !is_open;
+        save_state(&state);
+        Ok(())
+    } else {
+        Err("Main window not found".to_string())
+    }
+}
+
 // Команда для открытия терминала с SSH командой
 #[tauri::command]
 async fn open_terminal(command: String) -> Result<(), String> {
@@ -951,46 +971,7 @@ pub fn run() {
             data: Mutex::new(HashMap::new()),
         })
         .setup(|app| {
-            app.global_shortcut().on_shortcut("F12", |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let is_open = window.is_devtools_open();
-                        if is_open {
-                            let _ = window.close_devtools();
-                        } else {
-                            let _ = window.open_devtools();
-                        }
-                        // Сохраняем новое состояние
-                        let mut state = load_state();
-                        state.devtools_open = !is_open;
-                        save_state(&state);
-                    }
-                }
-            })?;
-
-            app.global_shortcut().on_shortcut("F5", |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    if let Some(webview) = app.get_webview_window("main") {
-                        let _ = webview.eval("window.location.reload()");
-                    }
-                }
-            })?;
-
-            app.global_shortcut().on_shortcut("F11", |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    if let Some(window) = app.get_webview_window("main") {
-                        match window.is_fullscreen() {
-                            Ok(is_fullscreen) => {
-                                let _ = window.set_fullscreen(!is_fullscreen);
-                            }
-                            Err(_) => {
-                                // В случае ошибки просто выключаем fullscreen
-                                let _ = window.set_fullscreen(false);
-                            }
-                        }
-                    }
-                }
-            })?;
+            // F12, F5, F11 теперь обрабатываются на фронтенде, а не глобально
 
             // Регистрируем горячую клавишу для переводов, если она сохранена
             let saved_state = load_state();
@@ -1012,80 +993,7 @@ pub fn run() {
                 }
             }
 
-            app.global_shortcut().on_shortcut("CommandOrControl+Shift+C", |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    if let Some(window) = app.get_webview_window("main") {
-                        println!("Opening DevTools with inspector mode...");
-
-                        // Проверяем, открыты ли DevTools
-                        let was_closed = !window.is_devtools_open();
-
-                        // Открываем DevTools если они закрыты
-                        if was_closed {
-                            let _ = window.open_devtools();
-
-                            // Сохраняем состояние
-                            let mut state = load_state();
-                            state.devtools_open = true;
-                            save_state(&state);
-                        }
-
-                        // Активируем инспектор элементов
-                        // После открытия DevTools нужно небольшое ожидание
-                        let delay = if was_closed { 700 } else { 100 };
-                        let window_clone = window.clone();
-
-                        std::thread::spawn(move || {
-                            std::thread::sleep(std::time::Duration::from_millis(delay));
-
-                            // Попытка активировать инспектор через JavaScript
-                            let _ = window_clone.eval(
-                                r#"
-                                (function() {
-                                    console.log('Attempting to activate element inspector...');
-
-                                    // Способ 1: Эмуляция нажатия Ctrl+Shift+C
-                                    function triggerInspector() {
-                                        const events = ['keydown', 'keypress', 'keyup'];
-
-                                        events.forEach(eventType => {
-                                            const event = new KeyboardEvent(eventType, {
-                                                key: 'C',
-                                                code: 'KeyC',
-                                                keyCode: 67,
-                                                which: 67,
-                                                charCode: eventType === 'keypress' ? 67 : 0,
-                                                ctrlKey: true,
-                                                shiftKey: true,
-                                                altKey: false,
-                                                metaKey: false,
-                                                bubbles: true,
-                                                cancelable: true,
-                                                composed: true
-                                            });
-
-                                            // Отправляем события на разные цели
-                                            document.dispatchEvent(event);
-                                            window.dispatchEvent(event);
-                                            document.body && document.body.dispatchEvent(event);
-                                        });
-                                    }
-
-                                    // Запускаем с задержками для надежности
-                                    triggerInspector();
-                                    setTimeout(triggerInspector, 50);
-                                    setTimeout(triggerInspector, 150);
-
-                                    console.log('Element inspector activation triggered');
-                                })();
-                                "#
-                            );
-
-                            println!("Inspector element picker requested");
-                        });
-                    }
-                }
-            })?;
+            // CommandOrControl+Shift+C теперь обрабатывается на фронтенде, а не глобально
 
             // Восстанавливаем состояние DevTools
             let saved_state = load_state();
@@ -1186,6 +1094,7 @@ pub fn run() {
             get_openai_api_key,
             send_to_chatgpt,
             type_text,
+            toggle_devtools,
             open_terminal,
             convert_to_mp4,
             get_jetbrains_projects,

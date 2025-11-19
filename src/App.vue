@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useRoute } from "vue-router";
+import { invoke } from '@tauri-apps/api/core';
 
 const route = useRoute();
 const isSidebarCollapsed = ref(false);
@@ -21,6 +22,37 @@ function toggleSidebar() {
 async function closeApp() {
   await getCurrentWindow().close();
 }
+
+// Локальная обработка горячих клавиш (работает только когда окно в фокусе)
+function handleKeydown(event: KeyboardEvent) {
+  // F12 - переключение DevTools
+  if (event.key === 'F12') {
+    event.preventDefault();
+    invoke('toggle_devtools').catch(err => console.error('Failed to toggle devtools:', err));
+  }
+
+  // F5 - перезагрузка страницы
+  if (event.key === 'F5') {
+    event.preventDefault();
+    window.location.reload();
+  }
+
+  // F11 - полноэкранный режим
+  if (event.key === 'F11') {
+    event.preventDefault();
+    getCurrentWindow().isFullscreen().then(isFullscreen => {
+      getCurrentWindow().setFullscreen(!isFullscreen);
+    }).catch(err => console.error('Failed to toggle fullscreen:', err));
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown);
+});
 </script>
 
 <template>
