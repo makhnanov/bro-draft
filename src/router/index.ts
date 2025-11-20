@@ -15,6 +15,7 @@ import TranslationsPage from '../pages/TranslationsPage.vue'
 import AreaSelectorPage from '../pages/AreaSelectorPage.vue'
 import SettingsPage from '../pages/SettingsPage.vue'
 import ProjectsPage from '../pages/ProjectsPage.vue'
+import NotificationsPage from '../pages/NotificationsPage.vue'
 import KeyboardPage from '../pages/KeyboardPage.vue'
 
 const routes = [
@@ -92,6 +93,11 @@ const routes = [
     path: '/projects',
     name: 'Projects',
     component: ProjectsPage
+  },
+  {
+    path: '/notifications',
+    name: 'Notifications',
+    component: NotificationsPage
   },
   {
     path: '/keyboard',
