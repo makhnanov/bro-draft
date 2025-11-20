@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 interface JetBrainsProject {
@@ -23,6 +23,102 @@ const allIdeGroups = ref<IDEGroup[]>([]); // Все группы без филь
 const loading = ref(true);
 const error = ref<string | null>(null);
 const searchQuery = ref('');
+
+// Hidden projects
+const hiddenProjects = ref<Set<string>>(new Set());
+const showHiddenForIDE = ref<Set<string>>(new Set()); // Which IDEs are showing hidden projects
+const contextMenu = ref<{ show: boolean; x: number; y: number; project: JetBrainsProject | null }>({
+  show: false,
+  x: 0,
+  y: 0,
+  project: null
+});
+
+// Check if project is hidden
+function isProjectHidden(projectPath: string): boolean {
+  return hiddenProjects.value.has(projectPath);
+}
+
+// Get hidden projects count for an IDE
+function getHiddenCount(ideName: string): number {
+  const ideGroup = allIdeGroups.value.find(g => g.name === ideName);
+  if (!ideGroup) return 0;
+  return ideGroup.projects.filter(p => hiddenProjects.value.has(p.project_path)).length;
+}
+
+// Get fully hidden IDEs (all projects hidden)
+function getFullyHiddenIDEs(): IDEGroup[] {
+  return allIdeGroups.value.filter(ideGroup => {
+    const hiddenCount = ideGroup.projects.filter(p => hiddenProjects.value.has(p.project_path)).length;
+    return hiddenCount === ideGroup.projects.length && hiddenCount > 0;
+  });
+}
+
+// Show all projects for a fully hidden IDE
+function showHiddenIDE(ideName: string) {
+  showHiddenForIDE.value.add(ideName);
+  filterProjects();
+}
+
+// Toggle show hidden for IDE
+function toggleShowHidden(ideName: string) {
+  if (showHiddenForIDE.value.has(ideName)) {
+    showHiddenForIDE.value.delete(ideName);
+  } else {
+    showHiddenForIDE.value.add(ideName);
+  }
+  filterProjects();
+}
+
+// Unhide project
+function unhideProject() {
+  if (contextMenu.value.project) {
+    hiddenProjects.value.delete(contextMenu.value.project.project_path);
+    saveHiddenProjects();
+    filterProjects();
+  }
+  hideContextMenu();
+}
+
+// Load hidden projects from localStorage
+function loadHiddenProjects() {
+  const saved = localStorage.getItem('hiddenProjects');
+  if (saved) {
+    hiddenProjects.value = new Set(JSON.parse(saved));
+  }
+}
+
+// Save hidden projects to localStorage
+function saveHiddenProjects() {
+  localStorage.setItem('hiddenProjects', JSON.stringify([...hiddenProjects.value]));
+}
+
+// Show context menu
+function showContextMenu(event: MouseEvent, project: JetBrainsProject) {
+  event.preventDefault();
+  contextMenu.value = {
+    show: true,
+    x: event.clientX,
+    y: event.clientY,
+    project
+  };
+}
+
+// Hide context menu
+function hideContextMenu() {
+  contextMenu.value.show = false;
+}
+
+// Hide project
+function hideProject() {
+  if (contextMenu.value.project) {
+    hiddenProjects.value.add(contextMenu.value.project.project_path);
+    saveHiddenProjects();
+    filterProjects();
+  }
+  hideContextMenu();
+}
+
 
 // Цвета для разных IDE
 const ideColors: Record<string, string> = {
@@ -184,16 +280,25 @@ function getProjectName(project: JetBrainsProject): string {
 function filterProjects() {
   const query = searchQuery.value.toLowerCase().trim();
 
-  if (!query) {
-    ideGroups.value = allIdeGroups.value;
-    return;
-  }
-
   // Фильтруем проекты в каждой IDE
   const filtered: IDEGroup[] = [];
 
   allIdeGroups.value.forEach(ideGroup => {
+    const showingHidden = showHiddenForIDE.value.has(ideGroup.name);
+
     const matchingProjects = ideGroup.projects.filter(project => {
+      const isHidden = hiddenProjects.value.has(project.project_path);
+
+      // Если проект скрыт и не показываем скрытые для этой IDE - исключаем
+      if (isHidden && !showingHidden) {
+        return false;
+      }
+
+      // Если нет поискового запроса, показываем проект
+      if (!query) {
+        return true;
+      }
+
       const projectName = getProjectName(project).toLowerCase();
       const projectPath = project.project_path.toLowerCase();
 
@@ -231,7 +336,13 @@ function formatDate(dateStr: string | null): string {
 }
 
 onMounted(() => {
+  loadHiddenProjects();
   loadProjects();
+  document.addEventListener('click', hideContextMenu);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', hideContextMenu);
 });
 </script>
 
@@ -313,6 +424,18 @@ onMounted(() => {
             <span class="ide-version">v{{ ide.version }}</span>
           </div>
           <div class="project-count">{{ ide.projects.length }}</div>
+          <button
+            v-if="getHiddenCount(ide.name) > 0"
+            class="toggle-hidden-btn"
+            :class="{ active: showHiddenForIDE.has(ide.name) }"
+            @click.stop="toggleShowHidden(ide.name)"
+            :title="showHiddenForIDE.has(ide.name) ? 'Hide hidden projects' : `Show ${getHiddenCount(ide.name)} hidden`"
+          >
+            <svg viewBox="0 0 24 24" class="eye-icon">
+              <path v-if="showHiddenForIDE.has(ide.name)" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/>
+              <path v-else d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" fill="currentColor"/>
+            </svg>
+          </button>
         </div>
 
         <div class="projects-list">
@@ -320,8 +443,9 @@ onMounted(() => {
             v-for="project in ide.projects"
             :key="project.project_path"
             class="project-item"
-            :class="{ 'project-missing': !project.exists }"
+            :class="{ 'project-missing': !project.exists, 'project-hidden': isProjectHidden(project.project_path) }"
             @click="openProject(project)"
+            @contextmenu="showContextMenu($event, project)"
           >
             <div class="project-icon">
               <svg viewBox="0 0 24 24">
@@ -338,6 +462,47 @@ onMounted(() => {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Hidden IDEs section -->
+    <div v-if="getFullyHiddenIDEs().length > 0" class="hidden-ides-section">
+      <div class="hidden-ides-header">
+        <svg viewBox="0 0 24 24" class="hidden-ides-icon">
+          <path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" fill="currentColor"/>
+        </svg>
+        <span>{{ getFullyHiddenIDEs().length }} hidden IDE(s)</span>
+      </div>
+      <div class="hidden-ides-list">
+        <button
+          v-for="ide in getFullyHiddenIDEs()"
+          :key="ide.name"
+          class="hidden-ide-btn"
+          :style="{ '--ide-color': getIDEColor(ide.name) }"
+          @click="showHiddenIDE(ide.name)"
+        >
+          {{ ide.name }} ({{ ide.projects.length }})
+        </button>
+      </div>
+    </div>
+
+    <!-- Context menu -->
+    <div
+      v-if="contextMenu.show"
+      class="context-menu"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+    >
+      <div v-if="contextMenu.project && isProjectHidden(contextMenu.project.project_path)" class="context-menu-item" @click="unhideProject">
+        <svg viewBox="0 0 24 24" class="context-menu-icon">
+          <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/>
+        </svg>
+        Show project
+      </div>
+      <div v-else class="context-menu-item" @click="hideProject">
+        <svg viewBox="0 0 24 24" class="context-menu-icon">
+          <path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" fill="currentColor"/>
+        </svg>
+        Hide project
       </div>
     </div>
   </div>
@@ -588,6 +753,31 @@ onMounted(() => {
   position relative
   z-index 1
 
+.toggle-hidden-btn
+  background rgba(255, 255, 255, 0.2)
+  border none
+  border-radius 8px
+  padding 6px
+  cursor pointer
+  display flex
+  align-items center
+  justify-content center
+  position relative
+  z-index 1
+  transition all 0.2s ease
+  margin-left 8px
+
+  &:hover
+    background rgba(255, 255, 255, 0.3)
+
+  &.active
+    background rgba(255, 255, 255, 0.4)
+
+  .eye-icon
+    width 20px
+    height 20px
+    color white
+
 .projects-list
   max-height 400px
   overflow-y auto
@@ -626,6 +816,13 @@ onMounted(() => {
     .project-icon
       svg
         fill #dc3545
+
+  &.project-hidden
+    opacity 0.5
+    background rgba(108, 117, 125, 0.1)
+
+    .project-name
+      text-decoration line-through
 
 .project-icon
   flex-shrink 0
@@ -679,6 +876,76 @@ onMounted(() => {
   border-radius 4px
   font-weight 600
 
+// Context menu styles
+.context-menu
+  position fixed
+  background white
+  border-radius 8px
+  box-shadow 0 4px 20px rgba(0, 0, 0, 0.15)
+  z-index 1000
+  min-width 160px
+  padding 8px 0
+  border 1px solid #e0e0e0
+
+.context-menu-item
+  padding 10px 16px
+  cursor pointer
+  display flex
+  align-items center
+  gap 10px
+  font-size 14px
+  color #333
+  transition background 0.2s ease
+
+  &:hover
+    background #f5f5f5
+
+.context-menu-icon
+  width 18px
+  height 18px
+  color #666
+
+// Hidden IDEs section
+.hidden-ides-section
+  margin-top 30px
+  padding 20px
+  background #f8f9fa
+  border-radius 12px
+  border 2px dashed #dee2e6
+
+.hidden-ides-header
+  display flex
+  align-items center
+  gap 10px
+  color #6c757d
+  font-size 14px
+  font-weight 600
+  margin-bottom 15px
+
+.hidden-ides-icon
+  width 20px
+  height 20px
+
+.hidden-ides-list
+  display flex
+  flex-wrap wrap
+  gap 10px
+
+.hidden-ide-btn
+  background white
+  border 2px solid var(--ide-color)
+  color var(--ide-color)
+  padding 8px 16px
+  border-radius 8px
+  font-size 13px
+  font-weight 600
+  cursor pointer
+  transition all 0.2s ease
+
+  &:hover
+    background var(--ide-color)
+    color white
+
 @media (prefers-color-scheme: dark)
   .ide-card
     background #2f2f2f
@@ -704,4 +971,27 @@ onMounted(() => {
 
       &:hover
         background #777
+
+  .context-menu
+    background #2f2f2f
+    border-color #444
+
+    .context-menu-item
+      color #f6f6f6
+
+      &:hover
+        background #3a3a3a
+
+    .context-menu-icon
+      color #aaa
+
+  .hidden-ides-section
+    background #2a2a2a
+    border-color #444
+
+  .hidden-ide-btn
+    background #2f2f2f
+
+    &:hover
+      background var(--ide-color)
 </style>
