@@ -294,7 +294,13 @@ onMounted(() => {
       >
         <div class="ide-header">
           <div class="ide-icon-wrapper">
-            <svg viewBox="0 0 24 24" class="ide-icon">
+            <img v-if="ide.name === 'PhpStorm'" src="/PhpStorm.svg" class="ide-icon-img" alt="PhpStorm" />
+            <img v-else-if="ide.name === 'WebStorm'" src="/WebStorm.svg" class="ide-icon-img" alt="WebStorm" />
+            <img v-else-if="ide.name === 'GoLand'" src="/GoLand.svg" class="ide-icon-img" alt="GoLand" />
+            <img v-else-if="ide.name === 'PyCharm'" src="/PyCharm.svg" class="ide-icon-img" alt="PyCharm" />
+            <img v-else-if="ide.name === 'DataGrip'" src="/DataGrip.svg" class="ide-icon-img" alt="DataGrip" />
+            <img v-else-if="ide.name === 'CLion'" src="/CLion.svg" class="ide-icon-img" alt="CLion" />
+            <svg v-else viewBox="0 0 24 24" class="ide-icon">
               <path :d="getIDEIcon(ide.name)" fill="white"/>
               <rect x="3" y="14" width="8" height="7" :fill="getIDEColor(ide.name)"/>
               <text x="7" y="19.5" font-size="6" font-weight="bold" fill="white" text-anchor="middle">
@@ -551,6 +557,11 @@ onMounted(() => {
 .ide-icon
   width 40px
   height 40px
+
+.ide-icon-img
+  width 40px
+  height 40px
+  object-fit contain
 
 .ide-info
   flex 1
