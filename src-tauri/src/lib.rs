@@ -537,7 +537,7 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     .position(popup_x as f64, popup_y as f64)
     .inner_size(popup_width as f64, popup_height as f64)
     .decorations(false)
-    .transparent(false)
+    .transparent(true)
     .always_on_top(false)
     .skip_taskbar(false)
     .visible(true)

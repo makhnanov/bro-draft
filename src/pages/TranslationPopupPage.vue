@@ -153,7 +153,7 @@ async function closePopup() {
   display flex
   flex-direction column
   height 100vh
-  background #ffffff
+  background rgba(255, 255, 255, 0.6)
   font-family -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif
 
 .popup-header
@@ -265,11 +265,17 @@ async function closePopup() {
 
 @media (prefers-color-scheme: dark)
   .translation-popup
-    background #2f2f2f
+    background rgba(47, 47, 47, 0.6)
     color #f6f6f6
 
   .result-box
     background #444
     border-color #555
     color #f6f6f6
+</style>
+
+<style lang="stylus">
+// Глобальные стили для прозрачности окна
+html, body
+  background transparent !important
 </style>
