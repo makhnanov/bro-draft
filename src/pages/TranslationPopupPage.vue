@@ -104,8 +104,8 @@ async function closePopup() {
 
 <template>
   <div class="translation-popup">
-    <div class="popup-header">
-      <h2>Выбранная область</h2>
+    <div class="popup-header" data-tauri-drag-region>
+      <h2 data-tauri-drag-region>Выбранная область</h2>
       <button class="close-btn" @click="closePopup">×</button>
     </div>
 
@@ -191,10 +191,10 @@ async function closePopup() {
   gap 10px
 
 .preview-section
-  text-align center
+  display flex
+  justify-content center
 
   img
-    max-width 100%
     border-radius 4px
     box-shadow 0 2px 8px rgba(0, 0, 0, 0.2)
 

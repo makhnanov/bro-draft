@@ -516,16 +516,17 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     }
 
     // Рассчитываем размер окна на основе размера изображения
-    let header_height = 50i32; // Высота заголовка
-    let padding = 30i32; // Отступы
+    let header_height = 54i32; // Высота заголовка (padding 15*2 + font ~24)
+    let content_padding = 15i32; // Padding в .popup-content
     let buttons_height = 180i32; // Высота кнопок (3 кнопки)
 
-    let popup_width = (width as i32 + padding * 2).max(400);
-    let popup_height = height as i32 + header_height + buttons_height + padding;
+    let popup_width = width as i32 + content_padding * 2;
+    let popup_height = height as i32 + header_height + buttons_height + content_padding * 2;
 
-    // Позиционируем окно так, чтобы изображение было на месте выбора
-    let popup_x = x - padding;
-    let popup_y = y - header_height - 15; // 15 = padding top в content
+    // Позиционируем окно так, чтобы изображение было по центру на месте выбора
+    // Центр изображения = x + width/2, центр окна = popup_x + popup_width/2
+    let popup_x = x - content_padding;
+    let popup_y = y - header_height - content_padding;
 
     let webview_window = WebviewWindowBuilder::new(
         &app_handle,
@@ -537,7 +538,7 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     .inner_size(popup_width as f64, popup_height as f64)
     .decorations(false)
     .transparent(false)
-    .always_on_top(true)
+    .always_on_top(false)
     .skip_taskbar(false)
     .visible(true)
     .resizable(true)
