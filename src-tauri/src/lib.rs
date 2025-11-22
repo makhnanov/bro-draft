@@ -516,15 +516,14 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     }
 
     // Рассчитываем размер окна на основе размера изображения
-    let header_height = 54i32; // Высота заголовка (padding 15*2 + font ~24)
+    let header_height = 54i32; // Высота кастомного заголовка
     let content_padding = 15i32; // Padding в .popup-content
     let buttons_height = 180i32; // Высота кнопок (3 кнопки)
 
     let popup_width = width as i32 + content_padding * 2;
     let popup_height = height as i32 + header_height + buttons_height + content_padding * 2;
 
-    // Позиционируем окно так, чтобы изображение было по центру на месте выбора
-    // Центр изображения = x + width/2, центр окна = popup_x + popup_width/2
+    // Позиционируем окно так, чтобы изображение было на месте выбора
     let popup_x = x - content_padding;
     let popup_y = y - header_height - content_padding - 9;
 
@@ -565,6 +564,28 @@ async fn close_translation_popup(app_handle: tauri::AppHandle) -> Result<(), Str
         window.close().map_err(|e| format!("Failed to close popup: {}", e))?;
     }
     Ok(())
+}
+
+// Команда для перемещения popup окна
+#[tauri::command]
+async fn move_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+            .map_err(|e| format!("Failed to move popup: {}", e))?;
+    }
+    Ok(())
+}
+
+// Команда для получения позиции popup окна
+#[tauri::command]
+async fn get_translation_popup_position(app_handle: tauri::AppHandle) -> Result<(i32, i32), String> {
+    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+        let pos = window.outer_position()
+            .map_err(|e| format!("Failed to get popup position: {}", e))?;
+        Ok((pos.x, pos.y))
+    } else {
+        Err("Popup window not found".to_string())
+    }
 }
 
 // Команда для обработки выбранной области - вырезает из сохранённого скриншота
@@ -1500,6 +1521,8 @@ pub fn run() {
             open_translation_popup,
             get_popup_screenshot,
             close_translation_popup,
+            move_translation_popup,
+            get_translation_popup_position,
             save_translation_hotkey,
             get_translation_hotkey,
             save_last_route,

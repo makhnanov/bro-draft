@@ -8,6 +8,54 @@ const recognitionResult = ref('');
 const isProcessing = ref(false);
 const apiKey = ref('');
 
+// Перетаскивание окна вручную
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let windowStartX = 0;
+let windowStartY = 0;
+
+async function startDrag(event: MouseEvent) {
+  if ((event.target as HTMLElement).closest('.close-btn')) {
+    return;
+  }
+  event.preventDefault();
+
+  isDragging = true;
+  dragStartX = event.screenX;
+  dragStartY = event.screenY;
+
+  try {
+    const [x, y] = await invoke<[number, number]>('get_translation_popup_position');
+    windowStartX = x;
+    windowStartY = y;
+  } catch (error) {
+    console.error('Failed to get position:', error);
+    return;
+  }
+
+  document.addEventListener('mousemove', onDrag);
+  document.addEventListener('mouseup', stopDrag);
+}
+
+async function onDrag(event: MouseEvent) {
+  if (!isDragging) return;
+
+  const deltaX = event.screenX - dragStartX;
+  const deltaY = event.screenY - dragStartY;
+
+  await invoke('move_translation_popup', {
+    x: windowStartX + deltaX,
+    y: windowStartY + deltaY
+  });
+}
+
+function stopDrag() {
+  isDragging = false;
+  document.removeEventListener('mousemove', onDrag);
+  document.removeEventListener('mouseup', stopDrag);
+}
+
 onMounted(async () => {
   // Загружаем API ключ
   try {
@@ -104,9 +152,9 @@ async function closePopup() {
 
 <template>
   <div class="translation-popup">
-    <div class="popup-header" data-tauri-drag-region>
-      <h2 data-tauri-drag-region>Выбранная область</h2>
-      <button class="close-btn" @click="closePopup">×</button>
+    <div class="popup-header" @mousedown="startDrag">
+      <h2>Выбранная область</h2>
+      <button class="close-btn" @click.stop="closePopup">×</button>
     </div>
 
     <div class="popup-content">
@@ -164,11 +212,14 @@ async function closePopup() {
   background linear-gradient(180deg, #0747a6 0%, #0052cc 100%)
   color white
   -webkit-app-region drag
+  cursor move
 
   h2
     margin 0
     font-size 18px
     font-weight 600
+    -webkit-app-region drag
+    cursor move
 
 .close-btn
   background transparent
