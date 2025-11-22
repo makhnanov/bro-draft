@@ -176,21 +176,18 @@ async function closePopup() {
 
     <div class="popup-actions">
       <button
-        @click="translateScreenshot"
-        class="btn btn-primary"
-        :disabled="isProcessing || !screenshot"
-      >
-        {{ isProcessing ? 'Обработка...' : 'Распознать и перевести' }}
-      </button>
-      <button
         @click="recognizeOnly"
         class="btn btn-secondary"
         :disabled="isProcessing || !screenshot"
       >
-        Просто распознать
+        {{ isProcessing ? 'Обработка...' : 'Распознать' }}
       </button>
-      <button @click="closePopup" class="btn btn-close">
-        Закрыть
+      <button
+        @click="translateScreenshot"
+        class="btn btn-primary"
+        :disabled="isProcessing || !screenshot"
+      >
+        {{ isProcessing ? 'Обработка...' : 'Перевести' }}
       </button>
     </div>
   </div>
@@ -273,9 +270,9 @@ async function closePopup() {
 
 .popup-actions
   display flex
-  flex-direction column
-  gap 8px
-  padding 15px 20px
+  flex-direction row
+  gap 10px
+  padding 15px
   border-top 1px solid #e0e0e0
 
 .btn

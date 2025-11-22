@@ -518,7 +518,7 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     // Рассчитываем размер окна на основе размера изображения
     let header_height = 54i32; // Высота кастомного заголовка
     let content_padding = 15i32; // Padding в .popup-content
-    let buttons_height = 180i32; // Высота кнопок (3 кнопки)
+    let buttons_height = 60i32; // Высота кнопок (1 ряд)
 
     let popup_width = width as i32 + content_padding * 2;
     let popup_height = height as i32 + header_height + buttons_height + content_padding * 2;
