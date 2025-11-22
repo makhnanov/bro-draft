@@ -260,6 +260,24 @@ struct ScreenshotState {
     data: Mutex<HashMap<usize, String>>, // monitor_index -> base64 screenshot
 }
 
+// Структура для записи кликов
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ClickPoint {
+    x: i32,
+    y: i32,
+    monitor: usize,
+    button: String, // "left" или "right"
+}
+
+// Глобальное состояние для записи кликов
+struct ClickRecordingState {
+    is_recording: Mutex<bool>,
+    clicks: std::sync::Arc<Mutex<Vec<ClickPoint>>>,
+}
+
+// Глобальная переменная для остановки записи
+static STOP_RECORDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 // Команда для получения сохранённого скриншота по индексу монитора
 #[tauri::command]
 fn get_stored_screenshot(monitor_index: usize, state: tauri::State<ScreenshotState>) -> Result<String, String> {
@@ -934,6 +952,264 @@ async fn convert_to_mp4(input_path: String) -> Result<String, String> {
     Ok(output_path)
 }
 
+// Команда для начала записи кликов
+#[tauri::command]
+async fn start_click_recording(state: tauri::State<'_, ClickRecordingState>) -> Result<(), String> {
+    println!("Starting click recording...");
+
+    // Очищаем предыдущую запись
+    {
+        let mut clicks = state.clicks.lock().unwrap();
+        clicks.clear();
+    }
+
+    // Устанавливаем флаг записи
+    {
+        let mut is_recording = state.is_recording.lock().unwrap();
+        *is_recording = true;
+    }
+
+    STOP_RECORDING.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    // Клонируем Arc для передачи в поток
+    let clicks_arc = state.clicks.clone();
+
+    tokio::task::spawn_blocking(move || {
+        use rdev::{listen, Event, EventType};
+
+        let callback = move |event: Event| {
+            if STOP_RECORDING.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+
+            // Записываем левые и правые клики мыши
+            let button = match event.event_type {
+                EventType::ButtonPress(rdev::Button::Left) => Some("left"),
+                EventType::ButtonPress(rdev::Button::Right) => Some("right"),
+                _ => None,
+            };
+
+            if let Some(btn) = button {
+                // Получаем позицию из события rdev (более точные координаты)
+                let (x, y) = {
+                    // Используем xdotool для более точных координат на Linux
+                    #[cfg(target_os = "linux")]
+                    {
+                        use std::process::Command;
+                        let output = Command::new("xdotool")
+                            .args(&["getmouselocation", "--shell"])
+                            .output();
+
+                        if let Ok(output) = output {
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            let mut x_val = 0i32;
+                            let mut y_val = 0i32;
+
+                            for line in stdout.lines() {
+                                if line.starts_with("X=") {
+                                    x_val = line[2..].parse().unwrap_or(0);
+                                } else if line.starts_with("Y=") {
+                                    y_val = line[2..].parse().unwrap_or(0);
+                                }
+                            }
+                            (x_val, y_val)
+                        } else {
+                            // Fallback к enigo
+                            use enigo::{Enigo, Mouse, Settings};
+                            match Enigo::new(&Settings::default()) {
+                                Ok(enigo) => enigo.location().unwrap_or((0, 0)),
+                                Err(_) => (0, 0),
+                            }
+                        }
+                    }
+
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        use enigo::{Enigo, Mouse, Settings};
+                        match Enigo::new(&Settings::default()) {
+                            Ok(enigo) => enigo.location().unwrap_or((0, 0)),
+                            Err(_) => (0, 0),
+                        }
+                    }
+                };
+
+                let click = ClickPoint {
+                    x,
+                    y,
+                    monitor: 0,
+                    button: btn.to_string(),
+                };
+                println!("Click recorded: x={}, y={}, button={}", x, y, btn);
+
+                if let Ok(mut clicks_lock) = clicks_arc.lock() {
+                    clicks_lock.push(click);
+                }
+            }
+        };
+
+        // Слушаем события до остановки
+        if let Err(error) = listen(callback) {
+            println!("Error listening for clicks: {:?}", error);
+        }
+    });
+
+    Ok(())
+}
+
+// Команда для остановки записи кликов
+#[tauri::command]
+fn stop_click_recording(state: tauri::State<'_, ClickRecordingState>) -> Result<Vec<ClickPoint>, String> {
+    println!("Stopping click recording...");
+
+    // Останавливаем запись
+    STOP_RECORDING.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    {
+        let mut is_recording = state.is_recording.lock().unwrap();
+        *is_recording = false;
+    }
+
+    // Возвращаем записанные клики
+    let clicks = state.clicks.lock().unwrap();
+    let result = clicks.clone();
+
+    println!("Recording stopped, {} clicks captured", result.len());
+    Ok(result)
+}
+
+// Команда для воспроизведения последовательности кликов
+#[tauri::command]
+async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64) -> Result<(), String> {
+    println!("Playing {} clicks with {}ms interval...", clicks.len(), interval_ms);
+
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Используем xdotool на Linux для более точных кликов
+        #[cfg(target_os = "linux")]
+        {
+            use std::process::Command;
+
+            // Получаем текущую позицию курсора
+            let mut current_x = 0i32;
+            let mut current_y = 0i32;
+
+            let output = Command::new("xdotool")
+                .args(&["getmouselocation", "--shell"])
+                .output();
+
+            if let Ok(output) = output {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if line.starts_with("X=") {
+                        current_x = line[2..].parse().unwrap_or(0);
+                    } else if line.starts_with("Y=") {
+                        current_y = line[2..].parse().unwrap_or(0);
+                    }
+                }
+            }
+
+            for (i, click) in clicks.iter().enumerate() {
+                // Плавное перемещение курсора
+                let steps = 20; // количество шагов для плавности
+                let dx = (click.x - current_x) as f64 / steps as f64;
+                let dy = (click.y - current_y) as f64 / steps as f64;
+
+                for step in 1..=steps {
+                    let intermediate_x = current_x + (dx * step as f64) as i32;
+                    let intermediate_y = current_y + (dy * step as f64) as i32;
+
+                    let _ = Command::new("xdotool")
+                        .args(&["mousemove", &intermediate_x.to_string(), &intermediate_y.to_string()])
+                        .status();
+
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+
+                // Финальная позиция
+                let _ = Command::new("xdotool")
+                    .args(&["mousemove", &click.x.to_string(), &click.y.to_string()])
+                    .status();
+
+                std::thread::sleep(Duration::from_millis(50));
+
+                // Кликаем нужной кнопкой
+                let button_num = if click.button == "right" { "3" } else { "1" };
+                let result = Command::new("xdotool")
+                    .arg("click")
+                    .arg(button_num)
+                    .status();
+
+                if let Err(e) = result {
+                    return Err(format!("Failed to click: {}", e));
+                }
+
+                println!("Click {} ({}) at ({}, {})", i + 1, click.button, click.x, click.y);
+
+                current_x = click.x;
+                current_y = click.y;
+
+                // Задержка между кликами
+                if i < clicks.len() - 1 {
+                    std::thread::sleep(Duration::from_millis(interval_ms));
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            use enigo::{Enigo, Mouse, Button, Coordinate, Settings};
+
+            let mut enigo = Enigo::new(&Settings::default())
+                .map_err(|e| format!("Failed to create Enigo: {:?}", e))?;
+
+            // Получаем текущую позицию
+            let (mut current_x, mut current_y) = enigo.location().unwrap_or((0, 0));
+
+            for (i, click) in clicks.iter().enumerate() {
+                // Плавное перемещение курсора
+                let steps = 20;
+                let dx = (click.x - current_x) as f64 / steps as f64;
+                let dy = (click.y - current_y) as f64 / steps as f64;
+
+                for step in 1..=steps {
+                    let intermediate_x = current_x + (dx * step as f64) as i32;
+                    let intermediate_y = current_y + (dy * step as f64) as i32;
+
+                    let _ = enigo.move_mouse(intermediate_x, intermediate_y, Coordinate::Abs);
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+
+                // Финальная позиция
+                enigo.move_mouse(click.x, click.y, Coordinate::Abs)
+                    .map_err(|e| format!("Failed to move mouse: {:?}", e))?;
+
+                std::thread::sleep(Duration::from_millis(50));
+
+                // Кликаем нужной кнопкой
+                let btn = if click.button == "right" { Button::Right } else { Button::Left };
+                enigo.button(btn, enigo::Direction::Click)
+                    .map_err(|e| format!("Failed to click: {:?}", e))?;
+
+                println!("Click {} ({}) at ({}, {})", i + 1, click.button, click.x, click.y);
+
+                current_x = click.x;
+                current_y = click.y;
+
+                // Задержка между кликами
+                if i < clicks.len() - 1 {
+                    std::thread::sleep(Duration::from_millis(interval_ms));
+                }
+            }
+        }
+
+        println!("Click sequence completed");
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
+
+    Ok(())
+}
+
 // Wait for dev server to be ready
 fn wait_for_dev_server(url: &str, max_attempts: u32) -> bool {
     for attempt in 1..=max_attempts {
@@ -969,6 +1245,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(ScreenshotState {
             data: Mutex::new(HashMap::new()),
+        })
+        .manage(ClickRecordingState {
+            is_recording: Mutex::new(false),
+            clicks: std::sync::Arc::new(Mutex::new(Vec::new())),
         })
         .setup(|app| {
             // F12, F5, F11 теперь обрабатываются на фронтенде, а не глобально
@@ -1098,7 +1378,10 @@ pub fn run() {
             open_terminal,
             convert_to_mp4,
             get_jetbrains_projects,
-            open_jetbrains_project
+            open_jetbrains_project,
+            start_click_recording,
+            stop_click_recording,
+            play_click_sequence
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

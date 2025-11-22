@@ -33,6 +33,7 @@ image = "0.25"
 base64 = "0.22"
 png = "0.17"
 enigo = "0.2"
+rdev = "0.5"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 webview2-com = "0.33"
