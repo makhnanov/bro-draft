@@ -526,7 +526,7 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     // Позиционируем окно так, чтобы изображение было по центру на месте выбора
     // Центр изображения = x + width/2, центр окна = popup_x + popup_width/2
     let popup_x = x - content_padding;
-    let popup_y = y - header_height - content_padding;
+    let popup_y = y - header_height - content_padding - 9;
 
     let webview_window = WebviewWindowBuilder::new(
         &app_handle,
