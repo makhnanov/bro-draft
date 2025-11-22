@@ -204,6 +204,11 @@ async function closePopup() {
   background rgba(255, 255, 255, 0.6)
   font-family -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif
 
+// Отключаем все анимации
+*
+  animation none !important
+  transition none !important
+
 .popup-header
   display flex
   justify-content space-between

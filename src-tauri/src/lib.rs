@@ -527,13 +527,14 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     let popup_x = x - content_padding;
     let popup_y = y - header_height - content_padding - 9;
 
+    // Создаём окно за пределами экрана чтобы избежать анимации compositor
     let webview_window = WebviewWindowBuilder::new(
         &app_handle,
         "translation-popup",
         WebviewUrl::App("/index.html#/translation-popup".into())
     )
     .title("Перевод")
-    .position(popup_x as f64, popup_y as f64)
+    .position(-10000.0, -10000.0)  // За пределами экрана
     .inner_size(popup_width as f64, popup_height as f64)
     .decorations(false)
     .transparent(true)
@@ -544,6 +545,11 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     .build()
     .map_err(|e| format!("Failed to create translation popup: {}", e))?;
 
+    // Перемещаем в нужную позицию
+    let _ = webview_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: popup_x,
+        y: popup_y
+    }));
     let _ = webview_window.set_focus();
 
     println!("Translation popup opened successfully");
