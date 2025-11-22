@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { invoke } from '@tauri-apps/api/core';
+
+const router = useRouter();
 
 const route = useRoute();
 const isSidebarCollapsed = ref(false);
 const toggleText = ref('BroLauncher');
 
-// Проверяем, является ли текущая страница area-selector
-const isAreaSelector = computed(() => route.path === '/area-selector');
+// Проверяем, является ли текущая страница area-selector или translation-popup
+const isAreaSelector = computed(() => route.path === '/area-selector' || route.path === '/translation-popup');
 
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
@@ -48,6 +50,21 @@ function handleKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown);
+
+  // Глобальный обработчик для Ctrl+PrintScreen - захват скриншота и переключение на Translations
+  window.addEventListener('translation-hotkey-pressed', async () => {
+    console.log('Global translation hotkey handler triggered');
+
+    // Переключаемся на страницу Translations
+    if (route.path !== '/translations') {
+      // Устанавливаем флаг для автозапуска скриншота
+      (window as any).__pendingScreenshotCapture = true;
+      await router.push('/translations');
+    } else {
+      // Если уже на странице, сразу запускаем захват
+      window.dispatchEvent(new CustomEvent('start-screenshot-capture'));
+    }
+  });
 });
 
 onUnmounted(() => {

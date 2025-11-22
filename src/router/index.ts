@@ -12,6 +12,7 @@ import TestPage from '../pages/TestPage.vue'
 import YouTubePage from '../pages/YouTubePage.vue'
 import EditorPage from '../pages/EditorPage.vue'
 import TranslationsPage from '../pages/TranslationsPage.vue'
+import TranslationPopupPage from '../pages/TranslationPopupPage.vue'
 import AreaSelectorPage from '../pages/AreaSelectorPage.vue'
 import SettingsPage from '../pages/SettingsPage.vue'
 import ProjectsPage from '../pages/ProjectsPage.vue'
@@ -80,6 +81,11 @@ const routes = [
     component: TranslationsPage
   },
   {
+    path: '/translation-popup',
+    name: 'TranslationPopup',
+    component: TranslationPopupPage
+  },
+  {
     path: '/area-selector',
     name: 'AreaSelector',
     component: AreaSelectorPage
@@ -134,8 +140,8 @@ router.isReady().then(async () => {
 
 // Сохраняем маршрут при каждом переходе (кроме начальной загрузки)
 router.afterEach((to) => {
-  // Не сохраняем маршрут при начальной загрузке и area-selector
-  if (!isInitialLoad && to.path !== '/area-selector') {
+  // Не сохраняем маршрут при начальной загрузке, area-selector и translation-popup
+  if (!isInitialLoad && to.path !== '/area-selector' && to.path !== '/translation-popup') {
     invoke('save_last_route', { route: to.path }).catch(err => {
       console.error('Failed to save route:', err)
     })

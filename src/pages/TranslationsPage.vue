@@ -6,9 +6,6 @@ import { listen } from '@tauri-apps/api/event';
 const apiKey = ref('');
 const currentHotkey = ref<string | null>(null);
 const isListeningForHotkey = ref(false);
-const screenshot = ref<string | null>(null);
-const showActionDialog = ref(false);
-const translationResult = ref('');
 const isProcessing = ref(false);
 
 // Автосохранение API ключа при изменении
@@ -37,11 +34,18 @@ onMounted(async () => {
       apiKey.value = savedApiKey;
     }
 
-    // Слушаем событие от Rust, когда горячая клавиша нажата
-    window.addEventListener('translation-hotkey-pressed', () => {
-      console.log('Translation hotkey event received!');
+    // Слушаем событие от App.vue для начала захвата скриншота
+    window.addEventListener('start-screenshot-capture', () => {
+      console.log('Start screenshot capture event received!');
       captureScreenshot();
     });
+
+    // Проверяем флаг автозапуска скриншота (установлен при переходе через Ctrl+PrintScreen)
+    if ((window as any).__pendingScreenshotCapture) {
+      (window as any).__pendingScreenshotCapture = false;
+      console.log('Auto-starting screenshot capture from pending flag');
+      captureScreenshot();
+    }
   } catch (error) {
     console.error('Failed to load settings:', error);
   }
@@ -136,7 +140,7 @@ async function captureScreenshot() {
     // Слушаем событие с выбранной областью
     const unlisten = await listen('area-selected', async (event: any) => {
       console.log('Received area-selected event:', event.payload);
-      const { x, y, width, height, monitorIndex } = event.payload;
+      const { x, y, width, height, monitorIndex, monitorX, monitorY } = event.payload;
 
       try {
         // Окна уже закрыты в handle_area_selection
@@ -150,9 +154,20 @@ async function captureScreenshot() {
           monitorIndex
         });
         console.log('Screenshot captured, length:', base64Image.length);
-        screenshot.value = base64Image;
-        showActionDialog.value = true;
-        console.log('Dialog shown');
+
+        // Рассчитываем абсолютные координаты на экране
+        const absoluteX = monitorX + x;
+        const absoluteY = monitorY + y;
+
+        // Открываем popup окно в позиции выбранной области
+        await invoke('open_translation_popup', {
+          x: absoluteX,
+          y: absoluteY,
+          width,
+          height,
+          imageBase64: base64Image
+        });
+        console.log('Translation popup opened');
       } catch (error) {
         console.error('Failed to capture area screenshot:', error);
         alert('Ошибка при создании скриншота области: ' + error);
@@ -182,48 +197,6 @@ async function captureScreenshot() {
     alert('Неожиданная ошибка: ' + error);
     isProcessing.value = false;
   }
-}
-
-// Отправка в ChatGPT для перевода
-async function translateScreenshot() {
-  if (!apiKey.value) {
-    alert('Пожалуйста, введите API ключ OpenAI');
-    return;
-  }
-
-  if (!screenshot.value) {
-    alert('Сначала нужно сделать скриншот');
-    return;
-  }
-
-  try {
-    isProcessing.value = true;
-
-    // Сохраняем API ключ, если он изменился
-    await invoke('save_openai_api_key', { apiKey: apiKey.value });
-
-    const prompt = 'Распознай текст на этом изображении и переведи его на русский язык. Верни только переведенный текст.';
-
-    const result = await invoke<string>('send_to_chatgpt', {
-      apiKey: apiKey.value,
-      imageBase64: screenshot.value,
-      prompt: prompt
-    });
-
-    translationResult.value = result;
-    showActionDialog.value = false;
-  } catch (error) {
-    console.error('Failed to translate:', error);
-    alert('Ошибка при отправке в ChatGPT: ' + error);
-  } finally {
-    isProcessing.value = false;
-  }
-}
-
-// Закрыть диалог
-function closeDialog() {
-  showActionDialog.value = false;
-  screenshot.value = null;
 }
 
 // Тестовый захват скриншота
@@ -278,43 +251,10 @@ async function testCapture() {
           Тестовый скриншот
         </button>
       </div>
-
-      <!-- Результат перевода -->
-      <div v-if="translationResult" class="result-section">
-        <h3>Результат перевода:</h3>
-        <div class="result-box">
-          {{ translationResult }}
-        </div>
-        <button @click="translationResult = ''" class="btn btn-secondary">
-          Очистить
-        </button>
-      </div>
-    </div>
-
-    <!-- Диалог выбора действия -->
-    <div v-if="showActionDialog" class="dialog-overlay" @click="closeDialog">
-      <div class="dialog" @click.stop>
-        <h2>Выбранная область</h2>
-        <div class="dialog-preview">
-          <img v-if="screenshot" :src="`data:image/png;base64,${screenshot}`" alt="Screenshot" />
-        </div>
-        <div class="dialog-actions">
-          <button
-            @click="translateScreenshot"
-            class="btn btn-primary"
-            :disabled="isProcessing"
-          >
-            {{ isProcessing ? 'Обработка...' : 'Распознать и перевести' }}
-          </button>
-          <button @click="closeDialog" class="btn btn-secondary">
-            Отмена
-          </button>
-        </div>
-      </div>
     </div>
 
     <!-- Индикатор загрузки -->
-    <div v-if="isProcessing && !showActionDialog" class="loading-overlay">
+    <div v-if="isProcessing" class="loading-overlay">
       <div class="spinner"></div>
       <p>Создание скриншота...</p>
     </div>

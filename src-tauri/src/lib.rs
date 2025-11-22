@@ -260,6 +260,11 @@ struct ScreenshotState {
     data: Mutex<HashMap<usize, String>>, // monitor_index -> base64 screenshot
 }
 
+// Глобальное состояние для данных popup окна перевода
+struct PopupState {
+    image_data: Mutex<Option<String>>, // base64 screenshot для popup
+}
+
 // Структура для записи кликов
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct ClickPoint {
@@ -457,6 +462,14 @@ async fn handle_area_selection(app_handle: tauri::AppHandle, x: u32, y: u32, wid
 
     println!("Handling area selection: x={}, y={}, width={}, height={}, monitor={}", x, y, width, height, monitor_index);
 
+    // Получаем информацию о мониторе для абсолютных координат
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+    let (monitor_x, monitor_y) = if let Some(screen) = screens.get(monitor_index) {
+        (screen.display_info.x, screen.display_info.y)
+    } else {
+        (0, 0)
+    };
+
     // Закрываем все окна area-selector
     close_all_area_selectors(app_handle.clone()).await?;
 
@@ -468,7 +481,9 @@ async fn handle_area_selection(app_handle: tauri::AppHandle, x: u32, y: u32, wid
             "y": y,
             "width": width,
             "height": height,
-            "monitorIndex": monitor_index
+            "monitorIndex": monitor_index,
+            "monitorX": monitor_x,
+            "monitorY": monitor_y
         });
         main_window.emit("area-selected", payload)
             .map_err(|e| format!("Failed to emit event: {}", e))?;
@@ -477,6 +492,77 @@ async fn handle_area_selection(app_handle: tauri::AppHandle, x: u32, y: u32, wid
         return Err("Main window not found".to_string());
     }
 
+    Ok(())
+}
+
+// Команда для открытия popup окна с переводом в позиции выбранной области
+#[tauri::command]
+async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, width: u32, height: u32, image_base64: String, popup_state: tauri::State<'_, PopupState>) -> Result<(), String> {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+
+    println!("Opening translation popup at x={}, y={}, size={}x{}", x, y, width, height);
+
+    // Сохраняем данные скриншота в state
+    {
+        let mut data = popup_state.image_data.lock().unwrap();
+        *data = Some(image_base64);
+    }
+
+    // Закрываем существующее popup окно если есть
+    if let Some(existing) = app_handle.get_webview_window("translation-popup") {
+        let _ = existing.close();
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    // Рассчитываем размер окна на основе размера изображения
+    let header_height = 50i32; // Высота заголовка
+    let padding = 30i32; // Отступы
+    let buttons_height = 180i32; // Высота кнопок (3 кнопки)
+
+    let popup_width = (width as i32 + padding * 2).max(400);
+    let popup_height = height as i32 + header_height + buttons_height + padding;
+
+    // Позиционируем окно так, чтобы изображение было на месте выбора
+    let popup_x = x - padding;
+    let popup_y = y - header_height - 15; // 15 = padding top в content
+
+    let webview_window = WebviewWindowBuilder::new(
+        &app_handle,
+        "translation-popup",
+        WebviewUrl::App("/index.html#/translation-popup".into())
+    )
+    .title("Перевод")
+    .position(popup_x as f64, popup_y as f64)
+    .inner_size(popup_width as f64, popup_height as f64)
+    .decorations(false)
+    .transparent(false)
+    .always_on_top(true)
+    .skip_taskbar(false)
+    .visible(true)
+    .resizable(true)
+    .build()
+    .map_err(|e| format!("Failed to create translation popup: {}", e))?;
+
+    let _ = webview_window.set_focus();
+
+    println!("Translation popup opened successfully");
+    Ok(())
+}
+
+// Команда для получения данных скриншота в popup
+#[tauri::command]
+fn get_popup_screenshot(popup_state: tauri::State<'_, PopupState>) -> Option<String> {
+    let data = popup_state.image_data.lock().unwrap();
+    data.clone()
+}
+
+// Команда для закрытия popup окна
+#[tauri::command]
+async fn close_translation_popup(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+        window.close().map_err(|e| format!("Failed to close popup: {}", e))?;
+    }
     Ok(())
 }
 
@@ -1275,6 +1361,9 @@ pub fn run() {
             is_recording: Mutex::new(false),
             clicks: std::sync::Arc::new(Mutex::new(Vec::new())),
         })
+        .manage(PopupState {
+            image_data: Mutex::new(None),
+        })
         .setup(|app| {
             // F12, F5, F11 теперь обрабатываются на фронтенде, а не глобально
 
@@ -1300,15 +1389,15 @@ pub fn run() {
 
             // CommandOrControl+Shift+C теперь обрабатывается на фронтенде, а не глобально
 
-            // Регистрируем Ctrl+PrintScreen для переключения на страницу переводов
+            // Регистрируем Ctrl+PrintScreen для переключения на страницу переводов и захвата скриншота
             match app.global_shortcut().on_shortcut("Ctrl+PrintScreen", move |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    println!("Ctrl+PrintScreen pressed - switching to translations");
+                    println!("Ctrl+PrintScreen pressed - switching to translations and capturing screenshot");
                     if let Some(window) = app.get_webview_window("main") {
-                        // Показываем окно и переключаемся на страницу переводов
+                        // Показываем окно и отправляем событие для переключения на страницу и захвата
                         let _ = window.show();
                         let _ = window.set_focus();
-                        let _ = window.eval("window.location.hash = '#/translations'");
+                        let _ = window.eval("window.dispatchEvent(new CustomEvent('translation-hotkey-pressed'))");
                     }
                 }
             }) {
@@ -1407,6 +1496,9 @@ pub fn run() {
             capture_area_screenshot,
             close_all_area_selectors,
             handle_area_selection,
+            open_translation_popup,
+            get_popup_screenshot,
+            close_translation_popup,
             save_translation_hotkey,
             get_translation_hotkey,
             save_last_route,
