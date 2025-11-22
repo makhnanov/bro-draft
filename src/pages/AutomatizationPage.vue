@@ -12,6 +12,7 @@ const isPlayingClicks = ref(false);
 const clickSequence = ref<Array<{x: number, y: number, monitor: number, button: string}>>([]);
 const clickCountdown = ref(0);
 const clickInterval = ref(2000); // интервал в миллисекундах
+const repeatCount = ref(1); // количество повторений
 
 async function startTyping() {
     if (!textToType.value.trim()) {
@@ -57,6 +58,10 @@ async function startRecording() {
 async function stopRecording() {
     try {
         const sequence = await invoke<Array<{x: number, y: number, monitor: number, button: string}>>('stop_click_recording');
+        // Удаляем последний клик (это клик по кнопке "Завершить запись")
+        if (sequence.length > 0) {
+            sequence.pop();
+        }
         clickSequence.value = sequence;
         isRecording.value = false;
         console.log('Recording stopped, clicks:', sequence.length);
@@ -84,7 +89,11 @@ async function playClickSequence() {
     clickCountdown.value = 0;
 
     try {
-        await invoke('play_click_sequence', { clicks: clickSequence.value, intervalMs: clickInterval.value });
+        await invoke('play_click_sequence', {
+            clicks: clickSequence.value,
+            intervalMs: clickInterval.value,
+            repeatCount: repeatCount.value
+        });
         console.log('Click sequence played');
     } catch (error) {
         console.error('Error playing clicks:', error);
@@ -132,11 +141,26 @@ async function playClickSequence() {
             </p>
 
             <div class="interval-control">
-                <label>Интервал между кликами:</label>
+                <label><b>Интервал:</b></label>
                 <div class="interval-buttons">
                     <button @click="clickInterval = Math.max(100, clickInterval - 100)" class="interval-btn">-</button>
                     <span class="interval-value">{{ (clickInterval / 1000).toFixed(1) }} сек</span>
                     <button @click="clickInterval = Math.min(10000, clickInterval + 100)" class="interval-btn">+</button>
+                </div>
+            </div>
+
+            <div class="interval-control">
+                <label><b>Повторений:</b></label>
+                <div class="interval-buttons">
+                    <button @click="repeatCount = Math.max(1, repeatCount - 1)" class="interval-btn">-</button>
+                    <input
+                        type="number"
+                        v-model.number="repeatCount"
+                        min="1"
+                        max="1000"
+                        class="repeat-input"
+                    />
+                    <button @click="repeatCount = Math.min(1000, repeatCount + 1)" class="interval-btn">+</button>
                 </div>
             </div>
 
@@ -287,14 +311,19 @@ async function playClickSequence() {
         color #A5ADBA
         cursor not-allowed
 
+.settings-row
+    display flex
+    gap 16px
+    margin-bottom 20px
+
 .interval-control
     display flex
     align-items center
     gap 16px
-    margin-bottom 20px
     padding 12px 16px
     background-color #f4f5f7
     border-radius 8px
+    margin-bottom 12px
 
     label
         font-weight 500
@@ -326,9 +355,27 @@ async function playClickSequence() {
     font-weight 600
     color #172B4D
 
+.repeat-input
+    width 80px
+    padding 8px 12px
+    border 2px solid #DFE1E6
+    border-radius 6px
+    font-size 14px
+    font-weight 600
+    text-align center
+    color #172B4D
+
+    &:focus
+        outline none
+        border-color #0052cc
+
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button
+        opacity 1
+
 .click-controls
     display flex
-    gap 12px
+    justify-content space-between
     margin-bottom 20px
 
 .record-button

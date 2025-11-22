@@ -867,7 +867,9 @@ async fn get_jetbrains_projects() -> Result<Vec<JetBrainsProject>, String> {
 // Команда для открытия проекта в JetBrains IDE
 #[tauri::command]
 async fn open_jetbrains_project(project_path: String, ide_name: String) -> Result<(), String> {
-    use tokio::process::Command;
+    use std::process::Command;
+    #[cfg(unix)]
+    use std::os::unix::process::CommandExt;
 
     println!("Opening project {} in {}", project_path, ide_name);
 
@@ -885,11 +887,23 @@ async fn open_jetbrains_project(project_path: String, ide_name: String) -> Resul
         _ => return Err(format!("Unknown IDE: {}", ide_name)),
     };
 
-    // Запускаем IDE с проектом
-    Command::new(ide_command)
-        .arg(&project_path)
-        .spawn()
-        .map_err(|e| format!("Failed to open project: {}", e))?;
+    // Запускаем IDE с проектом как независимый процесс
+    #[cfg(unix)]
+    {
+        Command::new(ide_command)
+            .arg(&project_path)
+            .process_group(0)  // Создаём новую группу процессов
+            .spawn()
+            .map_err(|e| format!("Failed to open project: {}", e))?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        Command::new(ide_command)
+            .arg(&project_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open project: {}", e))?;
+    }
 
     println!("Project opened successfully");
     Ok(())
@@ -1079,129 +1093,140 @@ fn stop_click_recording(state: tauri::State<'_, ClickRecordingState>) -> Result<
 
 // Команда для воспроизведения последовательности кликов
 #[tauri::command]
-async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64) -> Result<(), String> {
-    println!("Playing {} clicks with {}ms interval...", clicks.len(), interval_ms);
+async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64, repeat_count: u32) -> Result<(), String> {
+    println!("Playing {} clicks with {}ms interval, {} repeat(s)...", clicks.len(), interval_ms, repeat_count);
 
     tokio::task::spawn_blocking(move || -> Result<(), String> {
-        // Используем xdotool на Linux для более точных кликов
-        #[cfg(target_os = "linux")]
-        {
-            use std::process::Command;
+        for repeat in 0..repeat_count {
+            if repeat_count > 1 {
+                println!("=== Repeat {}/{} ===", repeat + 1, repeat_count);
+            }
 
-            // Получаем текущую позицию курсора
-            let mut current_x = 0i32;
-            let mut current_y = 0i32;
+            // Используем xdotool на Linux для более точных кликов
+            #[cfg(target_os = "linux")]
+            {
+                use std::process::Command;
 
-            let output = Command::new("xdotool")
-                .args(&["getmouselocation", "--shell"])
-                .output();
+                // Получаем текущую позицию курсора
+                let mut current_x = 0i32;
+                let mut current_y = 0i32;
 
-            if let Ok(output) = output {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    if line.starts_with("X=") {
-                        current_x = line[2..].parse().unwrap_or(0);
-                    } else if line.starts_with("Y=") {
-                        current_y = line[2..].parse().unwrap_or(0);
+                let output = Command::new("xdotool")
+                    .args(&["getmouselocation", "--shell"])
+                    .output();
+
+                if let Ok(output) = output {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        if line.starts_with("X=") {
+                            current_x = line[2..].parse().unwrap_or(0);
+                        } else if line.starts_with("Y=") {
+                            current_y = line[2..].parse().unwrap_or(0);
+                        }
+                    }
+                }
+
+                for (i, click) in clicks.iter().enumerate() {
+                    // Плавное перемещение курсора
+                    let steps = 20; // количество шагов для плавности
+                    let dx = (click.x - current_x) as f64 / steps as f64;
+                    let dy = (click.y - current_y) as f64 / steps as f64;
+
+                    for step in 1..=steps {
+                        let intermediate_x = current_x + (dx * step as f64) as i32;
+                        let intermediate_y = current_y + (dy * step as f64) as i32;
+
+                        let _ = Command::new("xdotool")
+                            .args(&["mousemove", &intermediate_x.to_string(), &intermediate_y.to_string()])
+                            .status();
+
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+
+                    // Финальная позиция
+                    let _ = Command::new("xdotool")
+                        .args(&["mousemove", &click.x.to_string(), &click.y.to_string()])
+                        .status();
+
+                    std::thread::sleep(Duration::from_millis(50));
+
+                    // Кликаем нужной кнопкой
+                    let button_num = if click.button == "right" { "3" } else { "1" };
+                    let result = Command::new("xdotool")
+                        .arg("click")
+                        .arg(button_num)
+                        .status();
+
+                    if let Err(e) = result {
+                        return Err(format!("Failed to click: {}", e));
+                    }
+
+                    println!("Click {} ({}) at ({}, {})", i + 1, click.button, click.x, click.y);
+
+                    current_x = click.x;
+                    current_y = click.y;
+
+                    // Задержка между кликами
+                    if i < clicks.len() - 1 {
+                        std::thread::sleep(Duration::from_millis(interval_ms));
                     }
                 }
             }
 
-            for (i, click) in clicks.iter().enumerate() {
-                // Плавное перемещение курсора
-                let steps = 20; // количество шагов для плавности
-                let dx = (click.x - current_x) as f64 / steps as f64;
-                let dy = (click.y - current_y) as f64 / steps as f64;
+            #[cfg(not(target_os = "linux"))]
+            {
+                use enigo::{Enigo, Mouse, Button, Coordinate, Settings};
 
-                for step in 1..=steps {
-                    let intermediate_x = current_x + (dx * step as f64) as i32;
-                    let intermediate_y = current_y + (dy * step as f64) as i32;
+                let mut enigo = Enigo::new(&Settings::default())
+                    .map_err(|e| format!("Failed to create Enigo: {:?}", e))?;
 
-                    let _ = Command::new("xdotool")
-                        .args(&["mousemove", &intermediate_x.to_string(), &intermediate_y.to_string()])
-                        .status();
+                // Получаем текущую позицию
+                let (mut current_x, mut current_y) = enigo.location().unwrap_or((0, 0));
 
-                    std::thread::sleep(Duration::from_millis(5));
+                for (i, click) in clicks.iter().enumerate() {
+                    // Плавное перемещение курсора
+                    let steps = 20;
+                    let dx = (click.x - current_x) as f64 / steps as f64;
+                    let dy = (click.y - current_y) as f64 / steps as f64;
+
+                    for step in 1..=steps {
+                        let intermediate_x = current_x + (dx * step as f64) as i32;
+                        let intermediate_y = current_y + (dy * step as f64) as i32;
+
+                        let _ = enigo.move_mouse(intermediate_x, intermediate_y, Coordinate::Abs);
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+
+                    // Финальная позиция
+                    enigo.move_mouse(click.x, click.y, Coordinate::Abs)
+                        .map_err(|e| format!("Failed to move mouse: {:?}", e))?;
+
+                    std::thread::sleep(Duration::from_millis(50));
+
+                    // Кликаем нужной кнопкой
+                    let btn = if click.button == "right" { Button::Right } else { Button::Left };
+                    enigo.button(btn, enigo::Direction::Click)
+                        .map_err(|e| format!("Failed to click: {:?}", e))?;
+
+                    println!("Click {} ({}) at ({}, {})", i + 1, click.button, click.x, click.y);
+
+                    current_x = click.x;
+                    current_y = click.y;
+
+                    // Задержка между кликами
+                    if i < clicks.len() - 1 {
+                        std::thread::sleep(Duration::from_millis(interval_ms));
+                    }
                 }
+            }
 
-                // Финальная позиция
-                let _ = Command::new("xdotool")
-                    .args(&["mousemove", &click.x.to_string(), &click.y.to_string()])
-                    .status();
-
-                std::thread::sleep(Duration::from_millis(50));
-
-                // Кликаем нужной кнопкой
-                let button_num = if click.button == "right" { "3" } else { "1" };
-                let result = Command::new("xdotool")
-                    .arg("click")
-                    .arg(button_num)
-                    .status();
-
-                if let Err(e) = result {
-                    return Err(format!("Failed to click: {}", e));
-                }
-
-                println!("Click {} ({}) at ({}, {})", i + 1, click.button, click.x, click.y);
-
-                current_x = click.x;
-                current_y = click.y;
-
-                // Задержка между кликами
-                if i < clicks.len() - 1 {
-                    std::thread::sleep(Duration::from_millis(interval_ms));
-                }
+            // Задержка между повторениями
+            if repeat < repeat_count - 1 {
+                std::thread::sleep(Duration::from_millis(interval_ms));
             }
         }
 
-        #[cfg(not(target_os = "linux"))]
-        {
-            use enigo::{Enigo, Mouse, Button, Coordinate, Settings};
-
-            let mut enigo = Enigo::new(&Settings::default())
-                .map_err(|e| format!("Failed to create Enigo: {:?}", e))?;
-
-            // Получаем текущую позицию
-            let (mut current_x, mut current_y) = enigo.location().unwrap_or((0, 0));
-
-            for (i, click) in clicks.iter().enumerate() {
-                // Плавное перемещение курсора
-                let steps = 20;
-                let dx = (click.x - current_x) as f64 / steps as f64;
-                let dy = (click.y - current_y) as f64 / steps as f64;
-
-                for step in 1..=steps {
-                    let intermediate_x = current_x + (dx * step as f64) as i32;
-                    let intermediate_y = current_y + (dy * step as f64) as i32;
-
-                    let _ = enigo.move_mouse(intermediate_x, intermediate_y, Coordinate::Abs);
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-
-                // Финальная позиция
-                enigo.move_mouse(click.x, click.y, Coordinate::Abs)
-                    .map_err(|e| format!("Failed to move mouse: {:?}", e))?;
-
-                std::thread::sleep(Duration::from_millis(50));
-
-                // Кликаем нужной кнопкой
-                let btn = if click.button == "right" { Button::Right } else { Button::Left };
-                enigo.button(btn, enigo::Direction::Click)
-                    .map_err(|e| format!("Failed to click: {:?}", e))?;
-
-                println!("Click {} ({}) at ({}, {})", i + 1, click.button, click.x, click.y);
-
-                current_x = click.x;
-                current_y = click.y;
-
-                // Задержка между кликами
-                if i < clicks.len() - 1 {
-                    std::thread::sleep(Duration::from_millis(interval_ms));
-                }
-            }
-        }
-
-        println!("Click sequence completed");
+        println!("Click sequence completed ({} repeats)", repeat_count);
         Ok(())
     })
     .await
@@ -1274,6 +1299,22 @@ pub fn run() {
             }
 
             // CommandOrControl+Shift+C теперь обрабатывается на фронтенде, а не глобально
+
+            // Регистрируем Ctrl+PrintScreen для переключения на страницу переводов
+            match app.global_shortcut().on_shortcut("Ctrl+PrintScreen", move |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    println!("Ctrl+PrintScreen pressed - switching to translations");
+                    if let Some(window) = app.get_webview_window("main") {
+                        // Показываем окно и переключаемся на страницу переводов
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.eval("window.location.hash = '#/translations'");
+                    }
+                }
+            }) {
+                Ok(_) => println!("Ctrl+PrintScreen shortcut registered successfully"),
+                Err(e) => eprintln!("Failed to register Ctrl+PrintScreen shortcut: {}", e),
+            }
 
             // Восстанавливаем состояние DevTools
             let saved_state = load_state();
