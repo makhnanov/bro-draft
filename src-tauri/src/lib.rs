@@ -680,6 +680,40 @@ async fn get_translation_popup_position(app_handle: tauri::AppHandle) -> Result<
     }
 }
 
+// Структура для размера окна
+#[derive(Serialize)]
+struct WindowSize {
+    width: u32,
+    height: u32,
+}
+
+// Команда для получения размера popup окна
+#[tauri::command]
+async fn get_window_size(app_handle: tauri::AppHandle) -> Result<WindowSize, String> {
+    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+        let size = window.inner_size()
+            .map_err(|e| format!("Failed to get window size: {}", e))?;
+        Ok(WindowSize {
+            width: size.width,
+            height: size.height,
+        })
+    } else {
+        Err("Popup window not found".to_string())
+    }
+}
+
+// Команда для установки размера popup окна
+#[tauri::command]
+async fn set_window_size(app_handle: tauri::AppHandle, width: u32, height: u32) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+        window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }))
+            .map_err(|e| format!("Failed to set window size: {}", e))?;
+        Ok(())
+    } else {
+        Err("Popup window not found".to_string())
+    }
+}
+
 // Команда для обработки выбранной области - вырезает из сохранённого скриншота
 #[tauri::command]
 async fn capture_area_screenshot(x: u32, y: u32, width: u32, height: u32, monitor_index: usize, state: tauri::State<'_, ScreenshotState>) -> Result<String, String> {
@@ -1759,6 +1793,8 @@ pub fn run() {
             solve_and_click,
             move_translation_popup,
             get_translation_popup_position,
+            get_window_size,
+            set_window_size,
             save_translation_hotkey,
             get_translation_hotkey,
             save_last_route,

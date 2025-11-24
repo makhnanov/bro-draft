@@ -10,6 +10,69 @@ const apiKey = ref('');
 const anthropicApiKey = ref('');
 const clickMarker = ref<{ x: number; y: number; answer: string } | null>(null);
 const autoOpenLinks = ref(false);
+const popupContent = ref<HTMLElement | null>(null);
+
+// Функция для изменения размера окна под контент
+async function resizeWindowToFit() {
+  await new Promise(resolve => setTimeout(resolve, 50)); // Ждём рендеринг
+
+  const popup = document.querySelector('.translation-popup') as HTMLElement;
+  if (!popup) return;
+
+  // Вычисляем нужную высоту
+  const headerHeight = 54;
+  const contentEl = popup.querySelector('.popup-content') as HTMLElement;
+  const actionsEl = popup.querySelector('.popup-actions') as HTMLElement;
+
+  if (!contentEl || !actionsEl) return;
+
+  // Временно убираем overflow для точного измерения
+  const oldOverflow = contentEl.style.overflow;
+  contentEl.style.overflow = 'visible';
+
+  const contentHeight = contentEl.scrollHeight;
+  const actionsHeight = actionsEl.offsetHeight;
+
+  contentEl.style.overflow = oldOverflow;
+
+  const newHeight = headerHeight + contentHeight + actionsHeight + 2;
+
+  // Ограничиваем максимальную высоту (80% экрана)
+  const maxHeight = window.screen.height * 0.8;
+  const finalHeight = Math.min(newHeight, maxHeight);
+
+  try {
+    // Получаем текущий размер окна
+    const currentSize = await invoke<{ width: number; height: number }>('get_window_size');
+
+    // Анимируем изменение размера
+    const startHeight = currentSize.height;
+    const duration = 200; // мс
+    const startTime = performance.now();
+
+    const animate = async (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Easing функция для плавности
+      const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+      const currentHeight = startHeight + (finalHeight - startHeight) * easeOutCubic;
+
+      await invoke('set_window_size', {
+        width: currentSize.width,
+        height: Math.round(currentHeight)
+      });
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  } catch (error) {
+    console.error('Failed to resize window:', error);
+  }
+}
 
 // Функция для определения, является ли текст ссылкой
 function isLink(text: string): boolean {
@@ -161,6 +224,7 @@ async function translateScreenshot() {
     });
 
     translationResult.value = result;
+    await resizeWindowToFit();
   } catch (error) {
     console.error('Failed to translate:', error);
     alert('Ошибка при отправке в ChatGPT: ' + error);
@@ -191,6 +255,7 @@ async function recognizeOnly() {
     });
 
     recognitionResult.value = result;
+    await resizeWindowToFit();
 
     // Если включено автооткрытие и результат - ссылка, открываем сразу
     if (autoOpenLinks.value && isLink(result)) {
@@ -464,7 +529,7 @@ async function closePopup() {
 .popup-content
   flex 1
   padding 15px
-  overflow auto
+  overflow hidden
   display flex
   flex-direction column
   gap 10px
