@@ -237,7 +237,7 @@ async function testCapture() {
             class="api-input"
           />
         </div>
-        <div class="input-group">
+        <div class="input-group" style="margin-top: 16px">
           <label>Anthropic API Key:</label>
           <input
             v-model="anthropicApiKey"
