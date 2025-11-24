@@ -17,6 +17,7 @@ struct AppState {
     translation_hotkey: Option<String>,
     last_route: Option<String>,
     openai_api_key: Option<String>,
+    anthropic_api_key: Option<String>,
 }
 
 impl Default for AppState {
@@ -30,6 +31,7 @@ impl Default for AppState {
             translation_hotkey: None,
             last_route: Some("/".to_string()),
             openai_api_key: None,
+            anthropic_api_key: None,
         }
     }
 }
@@ -263,6 +265,8 @@ struct ScreenshotState {
 // Глобальное состояние для данных popup окна перевода
 struct PopupState {
     image_data: Mutex<Option<String>>, // base64 screenshot для popup
+    screen_x: Mutex<i32>, // X координата скриншота на экране
+    screen_y: Mutex<i32>, // Y координата скриншота на экране
 }
 
 // Структура для записи кликов
@@ -313,25 +317,16 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
     println!("Capturing screenshot for area selection...");
 
     // Закрываем существующие окна area-selector если они есть
-    let mut monitor_index = 0;
-    let mut closed_any = false;
-    loop {
+    for monitor_index in 0..10 {
         let window_label = format!("area-selector-{}", monitor_index);
         if let Some(existing_window) = app_handle.get_webview_window(&window_label) {
-            println!("Closing existing area selector window: {}", window_label);
-            let _ = existing_window.close();
-            closed_any = true;
-        } else {
-            break;
+            println!("Destroying existing area selector window: {}", window_label);
+            let _ = existing_window.destroy();
         }
-        monitor_index += 1;
     }
 
-    // Даём больше времени на закрытие окон, если они были закрыты
-    if closed_any {
-        println!("Waiting for windows to close completely...");
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    }
+    // Небольшая пауза для завершения операций
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // Получаем все экраны
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
@@ -503,10 +498,18 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
 
     println!("Opening translation popup at x={}, y={}, size={}x{}", x, y, width, height);
 
-    // Сохраняем данные скриншота в state
+    // Сохраняем данные скриншота и координаты в state
     {
         let mut data = popup_state.image_data.lock().unwrap();
         *data = Some(image_base64);
+    }
+    {
+        let mut sx = popup_state.screen_x.lock().unwrap();
+        *sx = x;
+    }
+    {
+        let mut sy = popup_state.screen_y.lock().unwrap();
+        *sy = y;
     }
 
     // Закрываем существующее popup окно если есть
@@ -563,6 +566,14 @@ fn get_popup_screenshot(popup_state: tauri::State<'_, PopupState>) -> Option<Str
     data.clone()
 }
 
+// Команда для получения координат скриншота на экране
+#[tauri::command]
+fn get_popup_screen_position(popup_state: tauri::State<'_, PopupState>) -> (i32, i32) {
+    let x = *popup_state.screen_x.lock().unwrap();
+    let y = *popup_state.screen_y.lock().unwrap();
+    (x, y)
+}
+
 // Команда для закрытия popup окна
 #[tauri::command]
 async fn close_translation_popup(app_handle: tauri::AppHandle) -> Result<(), String> {
@@ -570,6 +581,79 @@ async fn close_translation_popup(app_handle: tauri::AppHandle) -> Result<(), Str
         window.close().map_err(|e| format!("Failed to close popup: {}", e))?;
     }
     Ok(())
+}
+
+// Команда для закрытия popup и выполнения клика с визуальной отметкой
+#[tauri::command]
+async fn solve_and_click(app_handle: tauri::AppHandle, x: i32, y: i32, answer: String) -> Result<(), String> {
+    use std::process::Command;
+
+    println!("Solve and click: ({}, {}) - {}", x, y, answer);
+
+    // Закрываем popup окно
+    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+        let _ = window.close();
+    }
+
+    // Выполняем остальное в отдельном потоке
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Ждём 1 секунду
+        std::thread::sleep(Duration::from_millis(1000));
+
+        // Получаем текущую позицию курсора
+        let mut current_x = 0i32;
+        let mut current_y = 0i32;
+
+        let output = Command::new("xdotool")
+            .args(&["getmouselocation", "--shell"])
+            .output();
+
+        if let Ok(output) = output {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.starts_with("X=") {
+                    current_x = line[2..].parse().unwrap_or(0);
+                } else if line.starts_with("Y=") {
+                    current_y = line[2..].parse().unwrap_or(0);
+                }
+            }
+        }
+
+        // Плавное перемещение курсора
+        let steps = 50;
+        let dx = (x - current_x) as f64 / steps as f64;
+        let dy = (y - current_y) as f64 / steps as f64;
+
+        println!("Moving cursor from ({}, {}) to ({}, {})", current_x, current_y, x, y);
+
+        for step in 1..=steps {
+            let intermediate_x = current_x + (dx * step as f64) as i32;
+            let intermediate_y = current_y + (dy * step as f64) as i32;
+
+            let _ = Command::new("xdotool")
+                .args(&["mousemove", &intermediate_x.to_string(), &intermediate_y.to_string()])
+                .status();
+
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Финальная позиция
+        let _ = Command::new("xdotool")
+            .args(&["mousemove", &x.to_string(), &y.to_string()])
+            .status();
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Кликаем
+        let _ = Command::new("xdotool")
+            .arg("click")
+            .arg("1")
+            .status();
+
+        println!("Click performed at ({}, {})", x, y);
+
+        Ok(())
+    }).await.map_err(|e| format!("Task failed: {}", e))?
 }
 
 // Команда для перемещения popup окна
@@ -715,6 +799,22 @@ fn get_openai_api_key() -> Result<Option<String>, String> {
     Ok(state.openai_api_key)
 }
 
+// Команда для сохранения Anthropic API ключа
+#[tauri::command]
+fn save_anthropic_api_key(api_key: String) -> Result<(), String> {
+    let mut state = load_state();
+    state.anthropic_api_key = Some(api_key);
+    save_state(&state);
+    Ok(())
+}
+
+// Команда для получения сохраненного Anthropic API ключа
+#[tauri::command]
+fn get_anthropic_api_key() -> Result<Option<String>, String> {
+    let state = load_state();
+    Ok(state.anthropic_api_key)
+}
+
 // Команда для отправки изображения в ChatGPT
 #[tauri::command]
 async fn send_to_chatgpt(api_key: String, image_base64: String, prompt: String) -> Result<String, String> {
@@ -769,6 +869,66 @@ async fn send_to_chatgpt(api_key: String, image_base64: String, prompt: String) 
         .to_string();
 
     println!("ChatGPT response received");
+    Ok(content)
+}
+
+// Команда для отправки изображения в Claude
+#[tauri::command]
+async fn send_to_claude(api_key: String, image_base64: String, prompt: String) -> Result<String, String> {
+    use reqwest;
+
+    println!("Sending to Claude...");
+
+    let client = reqwest::Client::new();
+
+    let request_body = serde_json::json!({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1024,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": image_base64
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt
+                    }
+                ]
+            }
+        ]
+    });
+
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Claude API error: {}", error_text));
+    }
+
+    let response_json: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let content = response_json["content"][0]["text"]
+        .as_str()
+        .ok_or("No content in response")?
+        .to_string();
+
+    println!("Claude response received");
     Ok(content)
 }
 
@@ -1241,10 +1401,12 @@ async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64, repeat_c
                 }
 
                 for (i, click) in clicks.iter().enumerate() {
-                    // Плавное перемещение курсора
-                    let steps = 20; // количество шагов для плавности
+                    // Плавное перемещение курсора (медленно для хорошей видимости)
+                    let steps = 100; // количество шагов для плавности
                     let dx = (click.x - current_x) as f64 / steps as f64;
                     let dy = (click.y - current_y) as f64 / steps as f64;
+
+                    println!("Moving cursor from ({}, {}) to ({}, {})", current_x, current_y, click.x, click.y);
 
                     for step in 1..=steps {
                         let intermediate_x = current_x + (dx * step as f64) as i32;
@@ -1254,7 +1416,7 @@ async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64, repeat_c
                             .args(&["mousemove", &intermediate_x.to_string(), &intermediate_y.to_string()])
                             .status();
 
-                        std::thread::sleep(Duration::from_millis(5));
+                        std::thread::sleep(Duration::from_millis(10));
                     }
 
                     // Финальная позиция
@@ -1391,6 +1553,8 @@ pub fn run() {
         })
         .manage(PopupState {
             image_data: Mutex::new(None),
+            screen_x: Mutex::new(0),
+            screen_y: Mutex::new(0),
         })
         .setup(|app| {
             // F12, F5, F11 теперь обрабатываются на фронтенде, а не глобально
@@ -1526,7 +1690,9 @@ pub fn run() {
             handle_area_selection,
             open_translation_popup,
             get_popup_screenshot,
+            get_popup_screen_position,
             close_translation_popup,
+            solve_and_click,
             move_translation_popup,
             get_translation_popup_position,
             save_translation_hotkey,
@@ -1535,7 +1701,10 @@ pub fn run() {
             get_last_route,
             save_openai_api_key,
             get_openai_api_key,
+            save_anthropic_api_key,
+            get_anthropic_api_key,
             send_to_chatgpt,
+            send_to_claude,
             type_text,
             toggle_devtools,
             open_terminal,

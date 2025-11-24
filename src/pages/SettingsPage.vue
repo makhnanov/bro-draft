@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
 
 const appVersion = ref('1.0.0');
 const theme = ref('auto');
 const language = ref('en');
 const notifications = ref(true);
+const openaiApiKey = ref('');
+const anthropicApiKey = ref('');
 
-onMounted(() => {
+onMounted(async () => {
     // Загрузка настроек из localStorage
     const savedTheme = localStorage.getItem('theme');
     const savedLanguage = localStorage.getItem('language');
@@ -15,12 +18,32 @@ onMounted(() => {
     if (savedTheme) theme.value = savedTheme;
     if (savedLanguage) language.value = savedLanguage;
     if (savedNotifications) notifications.value = savedNotifications === 'true';
+
+    // Загрузка API ключей
+    try {
+        const savedOpenaiKey = await invoke<string | null>('get_openai_api_key');
+        if (savedOpenaiKey) openaiApiKey.value = savedOpenaiKey;
+
+        const savedAnthropicKey = await invoke<string | null>('get_anthropic_api_key');
+        if (savedAnthropicKey) anthropicApiKey.value = savedAnthropicKey;
+    } catch (error) {
+        console.error('Failed to load API keys:', error);
+    }
 });
 
-function saveSettings() {
+async function saveSettings() {
     localStorage.setItem('theme', theme.value);
     localStorage.setItem('language', language.value);
     localStorage.setItem('notifications', notifications.value.toString());
+
+    // Сохранение API ключей
+    try {
+        await invoke('save_openai_api_key', { apiKey: openaiApiKey.value });
+        await invoke('save_anthropic_api_key', { apiKey: anthropicApiKey.value });
+    } catch (error) {
+        console.error('Failed to save API keys:', error);
+    }
+
     alert('Настройки сохранены');
 }
 
@@ -29,6 +52,8 @@ function resetSettings() {
         theme.value = 'auto';
         language.value = 'en';
         notifications.value = true;
+        openaiApiKey.value = '';
+        anthropicApiKey.value = '';
         localStorage.removeItem('theme');
         localStorage.removeItem('language');
         localStorage.removeItem('notifications');
@@ -79,6 +104,33 @@ function resetSettings() {
                         <input type="checkbox" v-model="notifications" class="setting-checkbox">
                         <span>Включить уведомления</span>
                     </label>
+                </div>
+            </div>
+
+            <!-- API ключи -->
+            <div class="section">
+                <h2 class="section-title">API ключи</h2>
+
+                <div class="setting-item">
+                    <label for="openai-api-key" class="setting-label">OpenAI API Key</label>
+                    <input
+                        type="password"
+                        v-model="openaiApiKey"
+                        id="openai-api-key"
+                        class="setting-input"
+                        placeholder="sk-..."
+                    >
+                </div>
+
+                <div class="setting-item">
+                    <label for="anthropic-api-key" class="setting-label">Anthropic API Key</label>
+                    <input
+                        type="password"
+                        v-model="anthropicApiKey"
+                        id="anthropic-api-key"
+                        class="setting-input"
+                        placeholder="sk-ant-..."
+                    >
                 </div>
             </div>
 
@@ -169,6 +221,24 @@ function resetSettings() {
     &:focus
         outline none
         border-color #0052cc
+
+.setting-input
+    width 100%
+    padding 10px 16px
+    border 2px solid #DFE1E6
+    border-radius 8px
+    font-size 14px
+    font-family inherit
+    background-color white
+    transition border-color 0.2s ease
+    box-sizing border-box
+
+    &:focus
+        outline none
+        border-color #0052cc
+
+    &::placeholder
+        color #A5ADBA
 
 .setting-checkbox
     margin-right 10px

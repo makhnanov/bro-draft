@@ -4,19 +4,28 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 const apiKey = ref('');
+const anthropicApiKey = ref('');
 const currentHotkey = ref<string | null>(null);
 const isListeningForHotkey = ref(false);
 const isProcessing = ref(false);
 
 // Автосохранение API ключа при изменении
 async function handleApiKeyChange() {
-  if (apiKey.value) {
-    try {
-      await invoke('save_openai_api_key', { apiKey: apiKey.value });
-      console.log('API key saved');
-    } catch (error) {
-      console.error('Failed to save API key:', error);
-    }
+  try {
+    await invoke('save_openai_api_key', { apiKey: apiKey.value });
+    console.log('OpenAI API key saved');
+  } catch (error) {
+    console.error('Failed to save OpenAI API key:', error);
+  }
+}
+
+// Автосохранение Anthropic API ключа при изменении
+async function handleAnthropicApiKeyChange() {
+  try {
+    await invoke('save_anthropic_api_key', { apiKey: anthropicApiKey.value });
+    console.log('Anthropic API key saved');
+  } catch (error) {
+    console.error('Failed to save Anthropic API key:', error);
   }
 }
 
@@ -28,10 +37,15 @@ onMounted(async () => {
       currentHotkey.value = savedHotkey;
     }
 
-    // Загружаем сохраненный API ключ
+    // Загружаем сохраненные API ключи
     const savedApiKey = await invoke<string | null>('get_openai_api_key');
     if (savedApiKey) {
       apiKey.value = savedApiKey;
+    }
+
+    const savedAnthropicKey = await invoke<string | null>('get_anthropic_api_key');
+    if (savedAnthropicKey) {
+      anthropicApiKey.value = savedAnthropicKey;
     }
 
     // Слушаем событие от App.vue для начала захвата скриншота
@@ -212,7 +226,7 @@ async function testCapture() {
     <div class="translations-content">
       <!-- Настройки API ключа -->
       <div class="settings-section">
-        <h3>Настройки</h3>
+        <h3>Настройки API</h3>
         <div class="input-group">
           <label>OpenAI API Key:</label>
           <input
@@ -220,6 +234,16 @@ async function testCapture() {
             @blur="handleApiKeyChange"
             type="password"
             placeholder="sk-..."
+            class="api-input"
+          />
+        </div>
+        <div class="input-group">
+          <label>Anthropic API Key:</label>
+          <input
+            v-model="anthropicApiKey"
+            @blur="handleAnthropicApiKeyChange"
+            type="password"
+            placeholder="sk-ant-..."
             class="api-input"
           />
         </div>

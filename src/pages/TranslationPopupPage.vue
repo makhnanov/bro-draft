@@ -7,6 +7,8 @@ const translationResult = ref('');
 const recognitionResult = ref('');
 const isProcessing = ref(false);
 const apiKey = ref('');
+const anthropicApiKey = ref('');
+const clickMarker = ref<{ x: number; y: number; answer: string } | null>(null);
 
 // Перетаскивание окна вручную
 let isDragging = false;
@@ -57,14 +59,19 @@ function stopDrag() {
 }
 
 onMounted(async () => {
-  // Загружаем API ключ
+  // Загружаем API ключи
   try {
     const savedApiKey = await invoke<string | null>('get_openai_api_key');
     if (savedApiKey) {
       apiKey.value = savedApiKey;
     }
+
+    const savedAnthropicKey = await invoke<string | null>('get_anthropic_api_key');
+    if (savedAnthropicKey) {
+      anthropicApiKey.value = savedAnthropicKey;
+    }
   } catch (error) {
-    console.error('Failed to load API key:', error);
+    console.error('Failed to load API keys:', error);
   }
 
   // Получаем данные скриншота из state
@@ -141,6 +148,129 @@ async function recognizeOnly() {
   }
 }
 
+async function solveTask() {
+  if (!anthropicApiKey.value) {
+    alert('API ключ Anthropic не настроен. Добавьте его в Настройках.');
+    return;
+  }
+
+  if (!screenshot.value) {
+    return;
+  }
+
+  try {
+    isProcessing.value = true;
+
+    const prompt = `Посмотри на это изображение. Это задача или тест. Определи правильный ответ и укажи координаты X и Y элемента на который нужно кликнуть чтобы выбрать этот ответ.
+
+Верни ответ СТРОГО в формате JSON:
+{"answer": "краткое описание ответа", "x": число, "y": число}
+
+Где x и y - координаты в пикселях относительно левого верхнего угла изображения.`;
+
+    const result = await invoke<string>('send_to_claude', {
+      apiKey: anthropicApiKey.value,
+      imageBase64: screenshot.value,
+      prompt: prompt
+    });
+
+    console.log('Claude response:', result);
+
+    // Парсим JSON из ответа
+    const jsonMatch = result.match(/\{[^}]+\}/);
+    if (!jsonMatch) {
+      alert('Не удалось получить координаты из ответа:\n\n' + result);
+      return;
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log('Parsed response:', parsed);
+
+    if (typeof parsed.x !== 'number' || typeof parsed.y !== 'number') {
+      alert('Некорректные координаты в ответе:\n\n' + result);
+      return;
+    }
+
+    console.log(`Claude coordinates: ${parsed.x}, ${parsed.y}`);
+    console.log(`Answer: ${parsed.answer}`);
+
+    // Показываем маркер на изображении
+    clickMarker.value = {
+      x: parsed.x,
+      y: parsed.y,
+      answer: parsed.answer || 'Правильный ответ'
+    };
+
+    // Ждём 1.5 секунды чтобы пользователь увидел маркер
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Получаем координаты где был сделан скриншот на экране
+    const [screenX, screenY] = await invoke<[number, number]>('get_popup_screen_position');
+
+    // Абсолютные координаты = позиция скриншота на экране + относительные координаты от Claude
+    const absoluteX = screenX + parsed.x;
+    const absoluteY = screenY + parsed.y;
+
+    console.log(`Screenshot position: ${screenX}, ${screenY}`);
+    console.log(`Absolute click position: ${absoluteX}, ${absoluteY}`);
+
+    // Закрываем окно и выполняем клик через Rust (в отдельном потоке)
+    await invoke('solve_and_click', {
+      x: absoluteX,
+      y: absoluteY,
+      answer: parsed.answer || 'Правильный ответ'
+    });
+
+  } catch (error) {
+    console.error('Failed to solve:', error);
+    alert('Ошибка при решении: ' + error);
+  } finally {
+    isProcessing.value = false;
+  }
+}
+
+async function confirmClick() {
+  if (!clickMarker.value) return;
+
+  try {
+    // Получаем координаты где был сделан скриншот на экране
+    const [screenX, screenY] = await invoke<[number, number]>('get_popup_screen_position');
+
+    // Абсолютные координаты = позиция скриншота на экране + относительные координаты от Claude
+    const absoluteX = screenX + clickMarker.value.x;
+    const absoluteY = screenY + clickMarker.value.y;
+
+    console.log(`Screenshot position: ${screenX}, ${screenY}`);
+    console.log(`Absolute click position: ${absoluteX}, ${absoluteY}`);
+
+    // Закрываем окно
+    await invoke('close_translation_popup');
+
+    // Ждём 1 секунду перед началом движения курсора
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Выполняем клик
+    await invoke('play_click_sequence', {
+      clicks: [{
+        x: absoluteX,
+        y: absoluteY,
+        monitor: 0,
+        button: 'left'
+      }],
+      intervalMs: 100,
+      repeatCount: 1
+    });
+
+  } catch (error) {
+    console.error('Failed to click:', error);
+    alert('Ошибка при клике: ' + error);
+  }
+}
+
+function cancelClick() {
+  clickMarker.value = null;
+}
+
 async function closePopup() {
   try {
     await invoke('close_translation_popup');
@@ -159,7 +289,17 @@ async function closePopup() {
 
     <div class="popup-content">
       <div class="preview-section">
-        <img v-if="screenshot" :src="`data:image/png;base64,${screenshot}`" alt="Screenshot" />
+        <div class="image-container" v-if="screenshot">
+          <img :src="`data:image/png;base64,${screenshot}`" alt="Screenshot" />
+          <div
+            v-if="clickMarker"
+            class="click-marker"
+            :style="{ left: clickMarker.x + 'px', top: clickMarker.y + 'px' }"
+          >
+            <div class="marker-dot"></div>
+            <div class="marker-label">{{ clickMarker.answer }}</div>
+          </div>
+        </div>
         <div v-else class="no-image">Загрузка изображения...</div>
       </div>
 
@@ -174,7 +314,15 @@ async function closePopup() {
       </div>
     </div>
 
-    <div class="popup-actions">
+    <div class="popup-actions" v-if="clickMarker">
+      <button @click="cancelClick" class="btn btn-secondary">
+        Отмена
+      </button>
+      <button @click="confirmClick" class="btn btn-solve">
+        Кликнуть
+      </button>
+    </div>
+    <div class="popup-actions" v-else>
       <button
         @click="recognizeOnly"
         class="btn btn-secondary"
@@ -188,6 +336,13 @@ async function closePopup() {
         :disabled="isProcessing || !screenshot"
       >
         {{ isProcessing ? 'Обработка...' : 'Перевести' }}
+      </button>
+      <button
+        @click="solveTask"
+        class="btn btn-solve"
+        :disabled="isProcessing || !screenshot"
+      >
+        {{ isProcessing ? 'Обработка...' : 'Решить' }}
       </button>
     </div>
   </div>
@@ -247,9 +402,42 @@ async function closePopup() {
   display flex
   justify-content center
 
+  .image-container
+    position relative
+    display inline-block
+
   img
     border-radius 4px
     box-shadow 0 2px 8px rgba(0, 0, 0, 0.2)
+
+.click-marker
+  position absolute
+  transform translate(-50%, -50%)
+  pointer-events none
+  z-index 10
+
+  .marker-dot
+    width 20px
+    height 20px
+    background rgba(255, 0, 0, 0.8)
+    border 3px solid white
+    border-radius 50%
+    box-shadow 0 0 10px rgba(0, 0, 0, 0.5)
+
+  .marker-label
+    position absolute
+    top 25px
+    left 50%
+    transform translateX(-50%)
+    background rgba(0, 0, 0, 0.8)
+    color white
+    padding 4px 8px
+    border-radius 4px
+    font-size 12px
+    white-space nowrap
+    max-width 200px
+    overflow hidden
+    text-overflow ellipsis
 
 .result-section
   h3
@@ -309,6 +497,13 @@ async function closePopup() {
 
   &:hover:not(:disabled)
     background #c82333
+
+.btn-solve
+  background #28a745
+  color white
+
+  &:hover:not(:disabled)
+    background #218838
 
 .no-image
   padding 40px
