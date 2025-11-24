@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 const screenshot = ref<string | null>(null);
@@ -9,6 +9,51 @@ const isProcessing = ref(false);
 const apiKey = ref('');
 const anthropicApiKey = ref('');
 const clickMarker = ref<{ x: number; y: number; answer: string } | null>(null);
+const autoOpenLinks = ref(false);
+
+// Функция для определения, является ли текст ссылкой
+function isLink(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  // Одно слово без пробелов и с точками = ссылка
+  // Или начинается с http:// или https://
+  if (trimmed.includes(' ')) return false;
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return true;
+  // Проверяем наличие точки и минимальную длину домена
+  const parts = trimmed.split('.');
+  if (parts.length >= 2 && parts[parts.length - 1].length >= 2) {
+    return true;
+  }
+  return false;
+}
+
+// Вычисляемое свойство для определения, есть ли ссылка в результате
+const detectedLink = computed(() => {
+  if (recognitionResult.value && isLink(recognitionResult.value)) {
+    return recognitionResult.value.trim();
+  }
+  return null;
+});
+
+// Открыть ссылку в браузере
+async function openLinkInBrowser() {
+  if (!detectedLink.value) return;
+  try {
+    await invoke('open_url_in_browser', { url: detectedLink.value });
+  } catch (error) {
+    console.error('Failed to open URL:', error);
+    alert('Ошибка при открытии ссылки: ' + error);
+  }
+}
+
+// Сохранить настройку автооткрытия
+async function saveAutoOpenSetting() {
+  try {
+    await invoke('save_auto_open_links', { enabled: autoOpenLinks.value });
+  } catch (error) {
+    console.error('Failed to save auto open setting:', error);
+  }
+}
 
 // Перетаскивание окна вручную
 let isDragging = false;
@@ -70,8 +115,14 @@ onMounted(async () => {
     if (savedAnthropicKey) {
       anthropicApiKey.value = savedAnthropicKey;
     }
+
+    // Загружаем настройку автооткрытия ссылок
+    const savedAutoOpen = await invoke<boolean | null>('get_auto_open_links');
+    if (savedAutoOpen !== null) {
+      autoOpenLinks.value = savedAutoOpen;
+    }
   } catch (error) {
-    console.error('Failed to load API keys:', error);
+    console.error('Failed to load settings:', error);
   }
 
   // Получаем данные скриншота из state
@@ -140,6 +191,11 @@ async function recognizeOnly() {
     });
 
     recognitionResult.value = result;
+
+    // Если включено автооткрытие и результат - ссылка, открываем сразу
+    if (autoOpenLinks.value && isLink(result)) {
+      await invoke('open_url_in_browser', { url: result.trim() });
+    }
   } catch (error) {
     console.error('Failed to recognize:', error);
     alert('Ошибка при распознавании: ' + error);
@@ -306,6 +362,21 @@ async function closePopup() {
       <div v-if="recognitionResult" class="result-section">
         <h3>Распознанный текст:</h3>
         <div class="result-box">{{ recognitionResult }}</div>
+
+        <!-- UI для ссылок -->
+        <div v-if="detectedLink" class="link-actions">
+          <button @click="openLinkInBrowser" class="btn btn-link">
+            Открыть ссылку
+          </button>
+          <label class="auto-open-checkbox">
+            <input
+              type="checkbox"
+              v-model="autoOpenLinks"
+              @change="saveAutoOpenSetting"
+            />
+            Автоматически открывать ссылки
+          </label>
+        </div>
       </div>
 
       <div v-if="translationResult" class="result-section">
@@ -504,6 +575,32 @@ async function closePopup() {
 
   &:hover:not(:disabled)
     background #218838
+
+.btn-link
+  background #17a2b8
+  color white
+
+  &:hover:not(:disabled)
+    background #138496
+
+.link-actions
+  margin-top 15px
+  display flex
+  flex-direction column
+  gap 10px
+
+.auto-open-checkbox
+  display flex
+  align-items center
+  gap 8px
+  font-size 13px
+  color #6B778C
+  cursor pointer
+
+  input[type="checkbox"]
+    width 16px
+    height 16px
+    cursor pointer
 
 .no-image
   padding 40px

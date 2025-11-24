@@ -18,6 +18,7 @@ struct AppState {
     last_route: Option<String>,
     openai_api_key: Option<String>,
     anthropic_api_key: Option<String>,
+    auto_open_links: Option<bool>,
 }
 
 impl Default for AppState {
@@ -32,6 +33,7 @@ impl Default for AppState {
             last_route: Some("/".to_string()),
             openai_api_key: None,
             anthropic_api_key: None,
+            auto_open_links: None,
         }
     }
 }
@@ -813,6 +815,68 @@ fn save_anthropic_api_key(api_key: String) -> Result<(), String> {
 fn get_anthropic_api_key() -> Result<Option<String>, String> {
     let state = load_state();
     Ok(state.anthropic_api_key)
+}
+
+// Команда для сохранения настройки автооткрытия ссылок
+#[tauri::command]
+fn save_auto_open_links(enabled: bool) -> Result<(), String> {
+    let mut state = load_state();
+    state.auto_open_links = Some(enabled);
+    save_state(&state);
+    println!("Auto open links saved: {}", enabled);
+    Ok(())
+}
+
+// Команда для получения настройки автооткрытия ссылок
+#[tauri::command]
+fn get_auto_open_links() -> Result<Option<bool>, String> {
+    let state = load_state();
+    Ok(state.auto_open_links)
+}
+
+// Команда для открытия URL в браузере
+#[tauri::command]
+async fn open_url_in_browser(url: String) -> Result<(), String> {
+    use std::process::Command;
+    #[cfg(unix)]
+    use std::os::unix::process::CommandExt;
+
+    println!("Opening URL in browser: {}", url);
+
+    // Добавляем https:// если протокол не указан
+    let full_url = if url.starts_with("http://") || url.starts_with("https://") {
+        url
+    } else {
+        format!("https://{}", url)
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(&full_url)
+            .process_group(0)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(&["/c", "start", "", &full_url])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&full_url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+
+    println!("URL opened successfully");
+    Ok(())
 }
 
 // Команда для отправки изображения в ChatGPT
@@ -1703,6 +1767,9 @@ pub fn run() {
             get_openai_api_key,
             save_anthropic_api_key,
             get_anthropic_api_key,
+            save_auto_open_links,
+            get_auto_open_links,
+            open_url_in_browser,
             send_to_chatgpt,
             send_to_claude,
             type_text,
