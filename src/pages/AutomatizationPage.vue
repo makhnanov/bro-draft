@@ -141,10 +141,13 @@ async function playClickSequence() {
             </p>
 
             <div class="interval-control">
-                <label><b>Интервал:</b></label>
+                <label>
+                    <b>Интервал:</b>
+                </label>
                 <div class="interval-buttons">
                     <button @click="clickInterval = Math.max(100, clickInterval - 100)" class="interval-btn">-</button>
-                    <span class="interval-value">{{ (clickInterval / 1000).toFixed(1) }} сек</span>
+                    <span class="interval-value"
+                          style="min-width: 90px">{{ (clickInterval / 1000).toFixed(1) }} сек</span>
                     <button @click="clickInterval = Math.min(10000, clickInterval + 100)" class="interval-btn">+</button>
                 </div>
             </div>
@@ -159,6 +162,7 @@ async function playClickSequence() {
                         min="1"
                         max="1000"
                         class="repeat-input"
+                        style="min-width: 90px"
                     />
                     <button @click="repeatCount = Math.min(1000, repeatCount + 1)" class="interval-btn">+</button>
                 </div>
@@ -328,6 +332,7 @@ async function playClickSequence() {
     label
         font-weight 500
         color #172B4D
+        min-width 106px
 
 .interval-buttons
     display flex
