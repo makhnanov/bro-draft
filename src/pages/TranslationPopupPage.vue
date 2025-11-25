@@ -10,7 +10,6 @@ const apiKey = ref('');
 const anthropicApiKey = ref('');
 const clickMarker = ref<{ x: number; y: number; answer: string } | null>(null);
 const autoOpenLinks = ref(false);
-const popupContent = ref<HTMLElement | null>(null);
 
 // Функция для изменения размера окна под контент
 async function resizeWindowToFit() {

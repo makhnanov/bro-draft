@@ -12,7 +12,8 @@
       "Bash(python3:*)",
       "Bash(pkill:*)",
       "WebSearch",
-      "Bash(pnpm build:*)"
+      "Bash(pnpm build:*)",
+      "Bash(make)"
     ],
     "deny": [],
     "ask": []
