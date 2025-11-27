@@ -18,6 +18,7 @@ import SettingsPage from '../pages/SettingsPage.vue'
 import ProjectsPage from '../pages/ProjectsPage.vue'
 import NotificationsPage from '../pages/NotificationsPage.vue'
 import KeyboardPage from '../pages/KeyboardPage.vue'
+import StreamingPage from '../pages/StreamingPage.vue'
 
 const routes = [
   {
@@ -109,6 +110,11 @@ const routes = [
     path: '/keyboard',
     name: 'Keyboard',
     component: KeyboardPage
+  },
+  {
+    path: '/streaming',
+    name: 'Streaming',
+    component: StreamingPage
   }
 ]
 

@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use screenshots::Screen;
 
+mod websocket_stream;
+
 #[derive(Serialize, Deserialize)]
 struct AppState {
     devtools_open: bool,
@@ -1609,6 +1611,110 @@ async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64, repeat_c
     Ok(())
 }
 
+// Структура для управления стриминг сервером
+struct StreamingServer {
+    handle: Mutex<Option<std::thread::JoinHandle<()>>>,
+    stop_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    screen_index: Mutex<usize>,
+}
+
+impl StreamingServer {
+    fn new() -> Self {
+        Self {
+            handle: Mutex::new(None),
+            stop_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            screen_index: Mutex::new(0),
+        }
+    }
+}
+
+// Команда для получения локального IP адреса
+#[tauri::command]
+fn get_local_ip() -> Result<String, String> {
+    use local_ip_address::local_ip;
+
+    match local_ip() {
+        Ok(ip) => Ok(ip.to_string()),
+        Err(e) => Err(format!("Failed to get local IP: {}", e)),
+    }
+}
+
+// Структура для ответа start_screen_streaming
+#[derive(Serialize)]
+struct StreamingInfo {
+    ip: String,
+    port: u16,
+}
+
+// Команда для запуска стриминг сервера
+#[tauri::command]
+fn start_screen_streaming(port: u16, screen_index: usize, state: tauri::State<'_, StreamingServer>) -> Result<StreamingInfo, String> {
+    use local_ip_address::local_ip;
+
+    println!("Starting WebSocket streaming server on port {} for screen {}", port, screen_index);
+
+    // Получаем локальный IP
+    let ip = match local_ip() {
+        Ok(ip) => ip.to_string(),
+        Err(e) => return Err(format!("Failed to get local IP: {}", e)),
+    };
+
+    // Останавливаем предыдущий сервер если он был запущен
+    {
+        let mut handle = state.handle.lock().unwrap();
+        if handle.is_some() {
+            state.stop_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            *handle = None;
+        }
+    }
+
+    // Сбрасываем флаг остановки
+    state.stop_signal.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    // Сохраняем индекс экрана
+    {
+        let mut idx = state.screen_index.lock().unwrap();
+        *idx = screen_index;
+    }
+
+    // Запускаем WebSocket сервер
+    let stop_signal = state.stop_signal.clone();
+    let handle = websocket_stream::start_websocket_server(port, screen_index, stop_signal)?;
+
+    // Сохраняем handle
+    {
+        let mut h = state.handle.lock().unwrap();
+        *h = Some(handle);
+    }
+
+    println!("WebSocket streaming server started on {}:{}", ip, port);
+    Ok(StreamingInfo { ip, port })
+}
+
+
+// Команда для остановки стриминг сервера
+#[tauri::command]
+fn stop_screen_streaming(state: tauri::State<'_, StreamingServer>) -> Result<(), String> {
+    println!("Stopping streaming server...");
+
+    // Устанавливаем флаг остановки
+    state.stop_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    // Ждём завершения потока
+    {
+        let mut handle = state.handle.lock().unwrap();
+        if let Some(h) = handle.take() {
+            // Не используем join, так как это может заблокировать основной поток
+            // Вместо этого просто отсоединяем поток
+            drop(h);
+        }
+    }
+
+    println!("Streaming server stopped");
+    Ok(())
+}
+
 // Wait for dev server to be ready
 fn wait_for_dev_server(url: &str, max_attempts: u32) -> bool {
     for attempt in 1..=max_attempts {
@@ -1654,6 +1760,7 @@ pub fn run() {
             screen_x: Mutex::new(0),
             screen_y: Mutex::new(0),
         })
+        .manage(StreamingServer::new())
         .setup(|app| {
             // F12, F5, F11 теперь обрабатываются на фронтенде, а не глобально
 
@@ -1816,7 +1923,10 @@ pub fn run() {
             open_jetbrains_project,
             start_click_recording,
             stop_click_recording,
-            play_click_sequence
+            play_click_sequence,
+            get_local_ip,
+            start_screen_streaming,
+            stop_screen_streaming
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

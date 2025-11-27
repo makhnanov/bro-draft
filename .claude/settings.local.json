@@ -10,12 +10,22 @@
       "Bash(ffmpeg:*)",
       "Bash(npm run build:*)",
       "Bash(python3:*)",
-      "Bash(pkill:*)",
       "WebSearch",
       "Bash(pnpm build:*)",
-      "Bash(make)"
+      "Bash(make)",
+      "Bash(cargo check:*)",
+      "Bash(pnpm tauri dev:*)",
+      "Bash(pkill:*)",
+      "Bash(systemctl:*)",
+      "Bash(xrandr --listmonitors:*)",
+      "Bash(sudo dpkg:*)",
+      "Bash(netstat:*)",
+      "Bash(flatpak list:*)",
+      "Bash(wget:*)"
     ],
-    "deny": [],
+    "deny": [
+      "Bash(killall:*)"
+    ],
     "ask": []
   }
 }
