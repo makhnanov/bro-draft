@@ -10,8 +10,8 @@ const route = useRoute();
 const isSidebarCollapsed = ref(false);
 const toggleText = ref('BroLauncher');
 
-// Проверяем, является ли текущая страница area-selector или translation-popup
-const isAreaSelector = computed(() => route.path === '/area-selector' || route.path === '/translation-popup');
+// Проверяем, является ли текущая страница area-selector или screenshot-popup
+const isAreaSelector = computed(() => route.path === '/area-selector' || route.path === '/screenshot-popup');
 
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
@@ -51,19 +51,28 @@ function handleKeydown(event: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown);
 
-  // Глобальный обработчик для Ctrl+PrintScreen - захват скриншота и переключение на Translations
+  // Глобальный обработчик для Ctrl+PrintScreen - захват скриншота и переключение на Screenshots
   window.addEventListener('translation-hotkey-pressed', async () => {
     console.log('Global translation hotkey handler triggered');
 
-    // Переключаемся на страницу Translations
-    if (route.path !== '/translations') {
+    // Переключаемся на страницу Screenshots
+    if (route.path !== '/screenshots') {
       // Устанавливаем флаг для автозапуска скриншота
       (window as any).__pendingScreenshotCapture = true;
-      await router.push('/translations');
+      await router.push('/screenshots');
     } else {
       // Если уже на странице, сразу запускаем захват
       window.dispatchEvent(new CustomEvent('start-screenshot-capture'));
     }
+  });
+
+  // Глобальный обработчик для Super+PrintScreen - скриншот с задержкой 5 секунд
+  // Работает в фоне, не переключая фокус
+  window.addEventListener('delayed-screenshot-hotkey-pressed', async () => {
+    console.log('Global delayed screenshot hotkey handler triggered');
+
+    // Отправляем событие для захвата полноэкранного скриншота с задержкой
+    window.dispatchEvent(new CustomEvent('start-fullscreen-delayed-capture'));
   });
 });
 
@@ -169,11 +178,12 @@ onUnmounted(() => {
         </svg>
         <span class="nav-text">Editor</span>
       </router-link>
-      <router-link to="/translations" class="nav-item">
+      <router-link to="/screenshots" class="nav-item">
         <svg viewBox="0 0 24 24" class="nav-icon">
-          <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="12" cy="13" r="4" fill="none" stroke="currentColor" stroke-width="2"/>
         </svg>
-        <span class="nav-text">Translations</span>
+        <span class="nav-text">Screenshots</span>
       </router-link>
       <router-link to="/projects" class="nav-item">
         <svg viewBox="0 0 24 24" class="nav-icon">

@@ -8,6 +8,8 @@ const anthropicApiKey = ref('');
 const currentHotkey = ref<string | null>(null);
 const isListeningForHotkey = ref(false);
 const isProcessing = ref(false);
+const countdown = ref<number | null>(null);
+const countdownInterval = ref<number | null>(null);
 
 // Автосохранение API ключа при изменении
 async function handleApiKeyChange() {
@@ -54,10 +56,32 @@ onMounted(async () => {
       captureScreenshot();
     });
 
+    // Слушаем событие от App.vue для начала захвата скриншота с задержкой
+    window.addEventListener('start-delayed-screenshot-capture', async () => {
+      console.log('Start delayed screenshot capture event received!');
+      await startDelayedCapture();
+      captureScreenshot();
+    });
+
+    // Слушаем событие для полноэкранного скриншота с задержкой (Super+PrintScreen)
+    window.addEventListener('start-fullscreen-delayed-capture', async () => {
+      console.log('Start fullscreen delayed capture event received!');
+      await startDelayedCapture();
+      captureFullscreenScreenshot();
+    });
+
     // Проверяем флаг автозапуска скриншота (установлен при переходе через Ctrl+PrintScreen)
     if ((window as any).__pendingScreenshotCapture) {
       (window as any).__pendingScreenshotCapture = false;
       console.log('Auto-starting screenshot capture from pending flag');
+      captureScreenshot();
+    }
+
+    // Проверяем флаг автозапуска скриншота с задержкой (установлен при переходе через Super+PrintScreen)
+    if ((window as any).__pendingDelayedScreenshotCapture) {
+      (window as any).__pendingDelayedScreenshotCapture = false;
+      console.log('Auto-starting delayed screenshot capture from pending flag');
+      await startDelayedCapture();
       captureScreenshot();
     }
   } catch (error) {
@@ -145,6 +169,56 @@ async function saveHotkey(hotkey: string) {
   }
 }
 
+// Запуск скриншота с задержкой в 5 секунд
+async function startDelayedCapture() {
+  countdown.value = 5;
+
+  return new Promise<void>((resolve) => {
+    countdownInterval.value = window.setInterval(() => {
+      if (countdown.value !== null && countdown.value > 0) {
+        countdown.value--;
+        if (countdown.value === 0) {
+          if (countdownInterval.value !== null) {
+            clearInterval(countdownInterval.value);
+            countdownInterval.value = null;
+          }
+          countdown.value = null;
+          resolve();
+        }
+      }
+    }, 1000);
+  });
+}
+
+// Захват полноэкранного скриншота (для Super+PrintScreen с задержкой)
+async function captureFullscreenScreenshot() {
+  try {
+    isProcessing.value = true;
+    console.log('Capturing fullscreen screenshot...');
+
+    // Делаем полноэкранный скриншот
+    const base64Image = await invoke<string>('capture_full_screenshot');
+    console.log('Fullscreen screenshot captured, length:', base64Image.length);
+
+    // Открываем popup окно в центре экрана (примерные координаты)
+    // Размеры popup будут по размеру экрана
+    await invoke('open_translation_popup', {
+      x: 100,
+      y: 100,
+      width: 1280,
+      height: 720,
+      imageBase64: base64Image
+    });
+    console.log('Screenshot popup opened');
+
+    isProcessing.value = false;
+  } catch (error) {
+    console.error('Failed to capture fullscreen screenshot:', error);
+    alert('Ошибка при создании полноэкранного скриншота: ' + error);
+    isProcessing.value = false;
+  }
+}
+
 // Захват скриншота через выбор области
 async function captureScreenshot() {
   try {
@@ -220,10 +294,10 @@ async function testCapture() {
 </script>
 
 <template>
-  <div class="translations-page">
-    <h1 class="page-title">Translations</h1>
+  <div class="screenshots-page">
+    <h1 class="page-title">Screenshots</h1>
 
-    <div class="translations-content">
+    <div class="screenshots-content">
       <!-- Настройки API ключа -->
       <div class="settings-section">
         <h3>Настройки API</h3>
@@ -277,6 +351,14 @@ async function testCapture() {
       </div>
     </div>
 
+    <!-- Обратный отсчет -->
+    <div v-if="countdown !== null" class="countdown-overlay">
+      <div class="countdown-circle">
+        <span class="countdown-number">{{ countdown }}</span>
+      </div>
+      <p>Приготовьтесь к скриншоту...</p>
+    </div>
+
     <!-- Индикатор загрузки -->
     <div v-if="isProcessing" class="loading-overlay">
       <div class="spinner"></div>
@@ -286,7 +368,7 @@ async function testCapture() {
 </template>
 
 <style scoped lang="stylus">
-.translations-page
+.screenshots-page
   display flex
   flex-direction column
   min-height 100vh
@@ -299,7 +381,7 @@ async function testCapture() {
   margin-bottom 30px
   text-align left
 
-.translations-content
+.screenshots-content
   display flex
   flex-direction column
   gap 30px
@@ -447,6 +529,50 @@ async function testCapture() {
   justify-content center
   gap 15px
 
+.countdown-overlay
+  position fixed
+  top 0
+  left 0
+  right 0
+  bottom 0
+  background rgba(255, 255, 255, 0.95)
+  display flex
+  flex-direction column
+  align-items center
+  justify-content center
+  z-index 9999
+
+  p
+    margin-top 30px
+    font-size 20px
+    font-weight 500
+    color #0052cc
+
+.countdown-circle
+  width 150px
+  height 150px
+  border-radius 50%
+  background linear-gradient(135deg, #0052cc 0%, #0747a6 100%)
+  display flex
+  align-items center
+  justify-content center
+  box-shadow 0 8px 24px rgba(0, 82, 204, 0.3)
+  animation pulse 1s ease-in-out infinite
+
+.countdown-number
+  font-size 80px
+  font-weight 700
+  color white
+  text-shadow 0 2px 8px rgba(0, 0, 0, 0.2)
+
+@keyframes pulse
+  0%, 100%
+    transform scale(1)
+    box-shadow 0 8px 24px rgba(0, 82, 204, 0.3)
+  50%
+    transform scale(1.05)
+    box-shadow 0 12px 32px rgba(0, 82, 204, 0.5)
+
 .loading-overlay
   position fixed
   top 0
@@ -499,4 +625,7 @@ async function testCapture() {
   .dialog
     background #2f2f2f
     color #f6f6f6
+
+  .countdown-overlay
+    background rgba(47, 47, 47, 0.95)
 </style>

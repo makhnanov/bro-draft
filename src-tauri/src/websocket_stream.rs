@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 use tungstenite::{accept, Message};
 use screenshots::Screen;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
 use image::ImageEncoder;
 
 pub fn start_websocket_server(
@@ -56,7 +56,7 @@ pub fn start_websocket_server(
 }
 
 fn handle_connection(
-    mut stream: TcpStream,
+    stream: TcpStream,
     stop_signal: Arc<AtomicBool>,
     screen_index: usize
 ) -> Result<(), String> {

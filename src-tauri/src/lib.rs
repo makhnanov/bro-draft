@@ -517,7 +517,7 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     }
 
     // Закрываем существующее popup окно если есть
-    if let Some(existing) = app_handle.get_webview_window("translation-popup") {
+    if let Some(existing) = app_handle.get_webview_window("screenshot-popup") {
         let _ = existing.close();
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
@@ -537,8 +537,8 @@ async fn open_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32, wi
     // Создаём окно за пределами экрана чтобы избежать анимации compositor
     let webview_window = WebviewWindowBuilder::new(
         &app_handle,
-        "translation-popup",
-        WebviewUrl::App("/index.html#/translation-popup".into())
+        "screenshot-popup",
+        WebviewUrl::App("/index.html#/screenshot-popup".into())
     )
     .title("Перевод")
     .position(-10000.0, -10000.0)  // За пределами экрана
@@ -581,7 +581,7 @@ fn get_popup_screen_position(popup_state: tauri::State<'_, PopupState>) -> (i32,
 // Команда для закрытия popup окна
 #[tauri::command]
 async fn close_translation_popup(app_handle: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+    if let Some(window) = app_handle.get_webview_window("screenshot-popup") {
         window.close().map_err(|e| format!("Failed to close popup: {}", e))?;
     }
     Ok(())
@@ -595,7 +595,7 @@ async fn solve_and_click(app_handle: tauri::AppHandle, x: i32, y: i32, answer: S
     println!("Solve and click: ({}, {}) - {}", x, y, answer);
 
     // Закрываем popup окно
-    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+    if let Some(window) = app_handle.get_webview_window("screenshot-popup") {
         let _ = window.close();
     }
 
@@ -663,7 +663,7 @@ async fn solve_and_click(app_handle: tauri::AppHandle, x: i32, y: i32, answer: S
 // Команда для перемещения popup окна
 #[tauri::command]
 async fn move_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+    if let Some(window) = app_handle.get_webview_window("screenshot-popup") {
         window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
             .map_err(|e| format!("Failed to move popup: {}", e))?;
     }
@@ -673,7 +673,7 @@ async fn move_translation_popup(app_handle: tauri::AppHandle, x: i32, y: i32) ->
 // Команда для получения позиции popup окна
 #[tauri::command]
 async fn get_translation_popup_position(app_handle: tauri::AppHandle) -> Result<(i32, i32), String> {
-    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+    if let Some(window) = app_handle.get_webview_window("screenshot-popup") {
         let pos = window.outer_position()
             .map_err(|e| format!("Failed to get popup position: {}", e))?;
         Ok((pos.x, pos.y))
@@ -692,7 +692,7 @@ struct WindowSize {
 // Команда для получения размера popup окна
 #[tauri::command]
 async fn get_window_size(app_handle: tauri::AppHandle) -> Result<WindowSize, String> {
-    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+    if let Some(window) = app_handle.get_webview_window("screenshot-popup") {
         let size = window.inner_size()
             .map_err(|e| format!("Failed to get window size: {}", e))?;
         Ok(WindowSize {
@@ -707,7 +707,7 @@ async fn get_window_size(app_handle: tauri::AppHandle) -> Result<WindowSize, Str
 // Команда для установки размера popup окна
 #[tauri::command]
 async fn set_window_size(app_handle: tauri::AppHandle, width: u32, height: u32) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("translation-popup") {
+    if let Some(window) = app_handle.get_webview_window("screenshot-popup") {
         window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }))
             .map_err(|e| format!("Failed to set window size: {}", e))?;
         Ok(())
@@ -1800,6 +1800,20 @@ pub fn run() {
             }) {
                 Ok(_) => println!("Ctrl+PrintScreen shortcut registered successfully"),
                 Err(e) => eprintln!("Failed to register Ctrl+PrintScreen shortcut: {}", e),
+            }
+
+            // Регистрируем Super+PrintScreen для скриншота с задержкой 5 секунд
+            match app.global_shortcut().on_shortcut("Super+PrintScreen", move |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    println!("Super+PrintScreen pressed - delayed screenshot capture");
+                    if let Some(window) = app.get_webview_window("main") {
+                        // НЕ переключаем фокус на окно, отправляем событие в фоне
+                        let _ = window.eval("window.dispatchEvent(new CustomEvent('delayed-screenshot-hotkey-pressed'))");
+                    }
+                }
+            }) {
+                Ok(_) => println!("Super+PrintScreen shortcut registered successfully"),
+                Err(e) => eprintln!("Failed to register Super+PrintScreen shortcut: {}", e),
             }
 
             // Восстанавливаем состояние DevTools
