@@ -18,8 +18,14 @@ interface IDEGroup {
   projects: JetBrainsProject[];
 }
 
+interface RecentProjectClick {
+  project_path: string;
+  clicked_at: number;
+}
+
 const ideGroups = ref<IDEGroup[]>([]);
 const allIdeGroups = ref<IDEGroup[]>([]); // Все группы без фильтрации
+const recentProjects = ref<JetBrainsProject[]>([]); // Последние открытые проекты (по кликам в приложении)
 const loading = ref(true);
 const error = ref<string | null>(null);
 const searchQuery = ref('');
@@ -91,6 +97,57 @@ function loadHiddenProjects() {
 // Save hidden projects to localStorage
 function saveHiddenProjects() {
   localStorage.setItem('hiddenProjects', JSON.stringify([...hiddenProjects.value]));
+}
+
+// Load recent project clicks from localStorage
+function loadRecentClicks(): RecentProjectClick[] {
+  const saved = localStorage.getItem('recentProjectClicks');
+  if (saved) {
+    return JSON.parse(saved);
+  }
+  return [];
+}
+
+// Save recent project click
+function saveProjectClick(projectPath: string) {
+  const clicks = loadRecentClicks();
+
+  // Удаляем старую запись если есть
+  const filtered = clicks.filter(c => c.project_path !== projectPath);
+
+  // Добавляем новую запись в начало
+  filtered.unshift({
+    project_path: projectPath,
+    clicked_at: Date.now()
+  });
+
+  // Сохраняем только последние 50 кликов
+  const limited = filtered.slice(0, 50);
+  localStorage.setItem('recentProjectClicks', JSON.stringify(limited));
+}
+
+// Update recent projects list based on clicks
+function updateRecentProjects() {
+  const clicks = loadRecentClicks();
+
+  // Создаем мапу всех доступных проектов для быстрого поиска
+  const projectsMap = new Map<string, JetBrainsProject>();
+  allIdeGroups.value.forEach(group => {
+    group.projects.forEach(project => {
+      projectsMap.set(project.project_path, project);
+    });
+  });
+
+  // Формируем список недавно открытых проектов на основе кликов
+  const recent: JetBrainsProject[] = [];
+  for (const click of clicks) {
+    const project = projectsMap.get(click.project_path);
+    if (project && recent.length < 5) {
+      recent.push(project);
+    }
+  }
+
+  recentProjects.value = recent;
 }
 
 // Show context menu
@@ -226,6 +283,9 @@ async function loadProjects() {
 
     allIdeGroups.value = finalGroups;
     ideGroups.value = finalGroups;
+
+    // Обновляем список недавно открытых проектов
+    updateRecentProjects();
   } catch (e) {
     error.value = String(e);
     console.error('Failed to load projects:', e);
@@ -252,10 +312,16 @@ function compareVersions(v1: string, v2: string): number {
 
 async function openProject(project: JetBrainsProject) {
   try {
+    // Сохраняем клик перед открытием
+    saveProjectClick(project.project_path);
+
     await invoke('open_jetbrains_project', {
       projectPath: project.project_path,
       ideName: project.ide_name
     });
+
+    // Обновляем список после сохранения клика
+    updateRecentProjects();
   } catch (e) {
     console.error('Failed to open project:', e);
     alert(`Failed to open project: ${e}`);
@@ -335,14 +401,34 @@ function formatDate(dateStr: string | null): string {
   return date.toLocaleDateString();
 }
 
+// Автоматическое обновление
+let autoRefreshInterval: number | null = null;
+
+function handleWindowFocus() {
+  loadProjects();
+}
+
 onMounted(() => {
   loadHiddenProjects();
   loadProjects();
   document.addEventListener('click', hideContextMenu);
+
+  // Обновляем при возвращении фокуса на окно
+  window.addEventListener('focus', handleWindowFocus);
+
+  // Автоматическое обновление каждые 30 секунд
+  autoRefreshInterval = window.setInterval(() => {
+    loadProjects();
+  }, 30000);
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', hideContextMenu);
+  window.removeEventListener('focus', handleWindowFocus);
+
+  if (autoRefreshInterval !== null) {
+    clearInterval(autoRefreshInterval);
+  }
 });
 </script>
 
@@ -396,7 +482,59 @@ onUnmounted(() => {
       <p>No projects found</p>
     </div>
 
-    <div v-else class="ide-grid">
+    <template v-else>
+      <!-- Recent Projects Section -->
+      <div v-if="recentProjects.length > 0" class="recent-section">
+        <div class="recent-header">
+          <svg viewBox="0 0 24 24" class="recent-icon">
+            <path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z" fill="currentColor"/>
+          </svg>
+          <h2 class="recent-title">Recently Opened</h2>
+        </div>
+
+        <div class="recent-grid">
+          <div
+            v-for="project in recentProjects"
+            :key="`recent_${project.project_path}`"
+            class="recent-project-card"
+            :style="{ '--ide-color': getIDEColor(project.ide_name) }"
+            @click="openProject(project)"
+            @contextmenu="showContextMenu($event, project)"
+          >
+            <div class="recent-project-header">
+              <div class="recent-ide-badge">
+                <img v-if="project.ide_name === 'PhpStorm'" src="/PhpStorm.svg" class="recent-ide-icon" alt="PhpStorm" />
+                <img v-else-if="project.ide_name === 'WebStorm'" src="/WebStorm.svg" class="recent-ide-icon" alt="WebStorm" />
+                <img v-else-if="project.ide_name === 'GoLand'" src="/GoLand.svg" class="recent-ide-icon" alt="GoLand" />
+                <img v-else-if="project.ide_name === 'PyCharm'" src="/PyCharm.svg" class="recent-ide-icon" alt="PyCharm" />
+                <img v-else-if="project.ide_name === 'DataGrip'" src="/DataGrip.svg" class="recent-ide-icon" alt="DataGrip" />
+                <img v-else-if="project.ide_name === 'CLion'" src="/CLion.svg" class="recent-ide-icon" alt="CLion" />
+                <svg v-else viewBox="0 0 24 24" class="recent-ide-icon-svg">
+                  <rect width="24" height="24" :fill="getIDEColor(project.ide_name)" rx="4"/>
+                  <text x="12" y="16" font-size="10" font-weight="bold" fill="white" text-anchor="middle">
+                    {{ project.ide_name.substring(0, 2).toUpperCase() }}
+                  </text>
+                </svg>
+                <span class="recent-ide-name">{{ project.ide_name }}</span>
+              </div>
+              <div class="recent-time">{{ formatDate(project.activation_time) }}</div>
+            </div>
+            <div class="recent-project-body">
+              <div class="recent-project-icon">
+                <svg viewBox="0 0 24 24">
+                  <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" fill="currentColor"/>
+                </svg>
+              </div>
+              <div class="recent-project-info">
+                <div class="recent-project-name">{{ getProjectName(project) }}</div>
+                <div class="recent-project-path">{{ project.project_path }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ide-grid">
       <div
         v-for="ide in ideGroups"
         :key="`${ide.name}_${ide.version}`"
@@ -464,6 +602,7 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+    </template>
 
     <!-- Hidden IDEs section -->
     <div v-if="getFullyHiddenIDEs().length > 0" class="hidden-ides-section">
@@ -668,6 +807,120 @@ onUnmounted(() => {
 
   &:hover
     background #0747a6
+
+// Recent Projects Section
+.recent-section
+  margin-bottom 40px
+  background linear-gradient(135deg, #667eea 0%, #764ba2 100%)
+  border-radius 16px
+  padding 30px
+  box-shadow 0 10px 40px rgba(102, 126, 234, 0.3)
+
+.recent-header
+  display flex
+  align-items center
+  gap 12px
+  margin-bottom 24px
+
+.recent-icon
+  width 28px
+  height 28px
+  color white
+
+.recent-title
+  font-size 24px
+  font-weight 700
+  color white
+  margin 0
+
+.recent-grid
+  display grid
+  grid-template-columns repeat(auto-fill, minmax(280px, 1fr))
+  gap 16px
+
+.recent-project-card
+  background white
+  border-radius 12px
+  padding 16px
+  cursor pointer
+  transition all 0.3s ease
+  border-left 4px solid var(--ide-color)
+  box-shadow 0 2px 8px rgba(0, 0, 0, 0.1)
+
+  &:hover
+    transform translateY(-4px)
+    box-shadow 0 8px 24px rgba(0, 0, 0, 0.2)
+
+.recent-project-header
+  display flex
+  justify-content space-between
+  align-items center
+  margin-bottom 12px
+  padding-bottom 12px
+  border-bottom 1px solid #e8e8e8
+
+.recent-ide-badge
+  display flex
+  align-items center
+  gap 8px
+
+.recent-ide-icon
+  width 24px
+  height 24px
+  object-fit contain
+
+.recent-ide-icon-svg
+  width 24px
+  height 24px
+
+.recent-ide-name
+  font-size 13px
+  font-weight 600
+  color var(--ide-color)
+
+.recent-time
+  font-size 11px
+  color #999
+  font-weight 500
+
+.recent-project-body
+  display flex
+  gap 12px
+  align-items flex-start
+
+.recent-project-icon
+  flex-shrink 0
+  width 32px
+  height 32px
+  display flex
+  align-items center
+  justify-content center
+
+  svg
+    width 24px
+    height 24px
+    fill var(--ide-color)
+
+.recent-project-info
+  flex 1
+  min-width 0
+
+.recent-project-name
+  font-size 15px
+  font-weight 600
+  color #333
+  margin-bottom 4px
+  overflow hidden
+  text-overflow ellipsis
+  white-space nowrap
+
+.recent-project-path
+  font-size 11px
+  color #888
+  font-family monospace
+  overflow hidden
+  text-overflow ellipsis
+  white-space nowrap
 
 .ide-grid
   display grid
@@ -947,6 +1200,21 @@ onUnmounted(() => {
     color white
 
 @media (prefers-color-scheme: dark)
+  .recent-section
+    background linear-gradient(135deg, #4a5568 0%, #2d3748 100%)
+
+  .recent-project-card
+    background #2f2f2f
+
+  .recent-project-header
+    border-bottom-color #444
+
+  .recent-project-name
+    color #f6f6f6
+
+  .recent-project-path
+    color #aaa
+
   .ide-card
     background #2f2f2f
 
