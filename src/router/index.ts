@@ -19,6 +19,7 @@ import ProjectsPage from '../pages/ProjectsPage.vue'
 import NotificationsPage from '../pages/NotificationsPage.vue'
 import KeyboardPage from '../pages/KeyboardPage.vue'
 import StreamingPage from '../pages/StreamingPage.vue'
+import TerminalPage from '../pages/TerminalPage.vue'
 
 const routes = [
   {
@@ -115,6 +116,11 @@ const routes = [
     path: '/streaming',
     name: 'Streaming',
     component: StreamingPage
+  },
+  {
+    path: '/terminal',
+    name: 'Terminal',
+    component: TerminalPage
   }
 ]
 

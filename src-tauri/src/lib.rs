@@ -258,6 +258,57 @@ async fn capture_full_screenshot() -> Result<String, String> {
     Ok(base64_image)
 }
 
+// Команда для захвата скриншота конкретного монитора
+#[tauri::command]
+async fn capture_monitor_screenshot(monitor_index: usize) -> Result<String, String> {
+    use png::Encoder;
+    use png::ColorType;
+    use std::io::BufWriter;
+
+    println!("Capturing screenshot of monitor {}...", monitor_index);
+
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+
+    if screens.is_empty() {
+        return Err("No screens found".to_string());
+    }
+
+    if monitor_index >= screens.len() {
+        return Err(format!("Monitor index {} out of range (available: {})", monitor_index, screens.len()));
+    }
+
+    let screen = &screens[monitor_index];
+    let captured_image = screen.capture().map_err(|e| format!("Failed to capture screen: {}", e))?;
+
+    // Кодируем изображение в PNG
+    let width = captured_image.width();
+    let height = captured_image.height();
+
+    // Получаем RAW данные из изображения
+    let rgba_data: Vec<u8> = captured_image.rgba().to_vec();
+
+    // Кодируем в PNG
+    let mut png_data = Vec::new();
+    {
+        let w = BufWriter::new(&mut png_data);
+        let mut encoder = Encoder::new(w, width, height);
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        let mut writer = encoder.write_header()
+            .map_err(|e| format!("Failed to write PNG header: {}", e))?;
+
+        writer.write_image_data(&rgba_data)
+            .map_err(|e| format!("Failed to write PNG data: {}", e))?;
+    }
+
+    // Конвертируем в base64
+    let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_data);
+
+    println!("Screenshot of monitor {} captured successfully", monitor_index);
+    Ok(base64_image)
+}
+
 use std::sync::Mutex;
 use std::collections::HashMap;
 
@@ -623,8 +674,8 @@ async fn solve_and_click(app_handle: tauri::AppHandle, x: i32, y: i32, answer: S
             }
         }
 
-        // Плавное перемещение курсора
-        let steps = 50;
+        // Плавное перемещение курсора (быстрее в 3 раза)
+        let steps = 17; // Уменьшено с 50 до ~17 (в 3 раза меньше)
         let dx = (x - current_x) as f64 / steps as f64;
         let dy = (y - current_y) as f64 / steps as f64;
 
@@ -638,7 +689,7 @@ async fn solve_and_click(app_handle: tauri::AppHandle, x: i32, y: i32, answer: S
                 .args(&["mousemove", &intermediate_x.to_string(), &intermediate_y.to_string()])
                 .status();
 
-            std::thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_millis(3)); // Уменьшено с 10 до 3 мс
         }
 
         // Финальная позиция
@@ -655,6 +706,83 @@ async fn solve_and_click(app_handle: tauri::AppHandle, x: i32, y: i32, answer: S
             .status();
 
         println!("Click performed at ({}, {})", x, y);
+
+        Ok(())
+    }).await.map_err(|e| format!("Task failed: {}", e))?
+}
+
+// Команда для выполнения клика с различными кнопками и количеством кликов
+#[tauri::command]
+async fn perform_click(x: i32, y: i32, button: String, click_count: u32) -> Result<(), String> {
+    use std::process::Command;
+
+    println!("Performing {} click(s) with {} button at ({}, {})", click_count, button, x, y);
+
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Получаем текущую позицию курсора
+        let mut current_x = 0i32;
+        let mut current_y = 0i32;
+
+        let output = Command::new("xdotool")
+            .args(&["getmouselocation", "--shell"])
+            .output();
+
+        if let Ok(output) = output {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.starts_with("X=") {
+                    current_x = line[2..].parse().unwrap_or(0);
+                } else if line.starts_with("Y=") {
+                    current_y = line[2..].parse().unwrap_or(0);
+                }
+            }
+        }
+
+        // Плавное перемещение курсора
+        let steps = 17;
+        let dx = (x - current_x) as f64 / steps as f64;
+        let dy = (y - current_y) as f64 / steps as f64;
+
+        for step in 1..=steps {
+            let intermediate_x = current_x + (dx * step as f64) as i32;
+            let intermediate_y = current_y + (dy * step as f64) as i32;
+
+            let _ = Command::new("xdotool")
+                .args(&["mousemove", &intermediate_x.to_string(), &intermediate_y.to_string()])
+                .status();
+
+            std::thread::sleep(Duration::from_millis(3));
+        }
+
+        // Финальная позиция
+        let _ = Command::new("xdotool")
+            .args(&["mousemove", &x.to_string(), &y.to_string()])
+            .status();
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Определяем номер кнопки для xdotool
+        let button_num = match button.as_str() {
+            "left" => "1",
+            "middle" => "2",
+            "right" => "3",
+            _ => "1",
+        };
+
+        // Выполняем клики
+        for _ in 0..click_count {
+            let _ = Command::new("xdotool")
+                .arg("click")
+                .arg(button_num)
+                .status();
+
+            // Небольшая задержка между кликами для двойного клика
+            if click_count > 1 {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+
+        println!("{} click(s) performed at ({}, {}) with {} button", click_count, x, y, button);
 
         Ok(())
     }).await.map_err(|e| format!("Task failed: {}", e))?
@@ -1501,8 +1629,8 @@ async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64, repeat_c
                 }
 
                 for (i, click) in clicks.iter().enumerate() {
-                    // Плавное перемещение курсора (медленно для хорошей видимости)
-                    let steps = 100; // количество шагов для плавности
+                    // Плавное перемещение курсора (быстрее в 3 раза)
+                    let steps = 33; // Уменьшено с 100 до ~33 (в 3 раза меньше)
                     let dx = (click.x - current_x) as f64 / steps as f64;
                     let dy = (click.y - current_y) as f64 / steps as f64;
 
@@ -1516,7 +1644,7 @@ async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64, repeat_c
                             .args(&["mousemove", &intermediate_x.to_string(), &intermediate_y.to_string()])
                             .status();
 
-                        std::thread::sleep(Duration::from_millis(10));
+                        std::thread::sleep(Duration::from_millis(3)); // Уменьшено с 10 до 3 мс
                     }
 
                     // Финальная позиция
@@ -1560,8 +1688,8 @@ async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64, repeat_c
                 let (mut current_x, mut current_y) = enigo.location().unwrap_or((0, 0));
 
                 for (i, click) in clicks.iter().enumerate() {
-                    // Плавное перемещение курсора
-                    let steps = 20;
+                    // Плавное перемещение курсора (быстрее в 3 раза)
+                    let steps = 7; // Уменьшено с 20 до ~7 (в 3 раза меньше)
                     let dx = (click.x - current_x) as f64 / steps as f64;
                     let dy = (click.y - current_y) as f64 / steps as f64;
 
@@ -1570,7 +1698,7 @@ async fn play_click_sequence(clicks: Vec<ClickPoint>, interval_ms: u64, repeat_c
                         let intermediate_y = current_y + (dy * step as f64) as i32;
 
                         let _ = enigo.move_mouse(intermediate_x, intermediate_y, Coordinate::Abs);
-                        std::thread::sleep(Duration::from_millis(5));
+                        std::thread::sleep(Duration::from_millis(2)); // Уменьшено с 5 до 2 мс
                     }
 
                     // Финальная позиция
@@ -1712,6 +1840,279 @@ fn stop_screen_streaming(state: tauri::State<'_, StreamingServer>) -> Result<(),
     }
 
     println!("Streaming server stopped");
+    Ok(())
+}
+
+// Структура для результата поиска изображения
+#[derive(Serialize, Deserialize, Clone)]
+struct ImageSearchResult {
+    x: i32,
+    y: i32,
+    match_percentage: f64,
+}
+
+// Команда для поиска изображения на экране (оптимизированная версия)
+#[tauri::command]
+async fn find_image_on_screen(
+    screen_image: String,
+    target_image: String,
+    _target_width: u32,
+    _target_height: u32,
+) -> Result<Option<ImageSearchResult>, String> {
+    use image::GenericImageView;
+    use rayon::prelude::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    println!("Searching for image on screen (optimized)...");
+    let start_time = std::time::Instant::now();
+
+    // Декодируем base64 изображения
+    let screen_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &screen_image)
+        .map_err(|e| format!("Failed to decode screen image: {}", e))?;
+    let target_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &target_image)
+        .map_err(|e| format!("Failed to decode target image: {}", e))?;
+
+    // Загружаем изображения
+    let screen = image::load_from_memory(&screen_bytes)
+        .map_err(|e| format!("Failed to load screen image: {}", e))?;
+    let target = image::load_from_memory(&target_bytes)
+        .map_err(|e| format!("Failed to load target image: {}", e))?;
+
+    let screen_rgba = screen.to_rgba8();
+    let target_rgba = target.to_rgba8();
+
+    let (screen_w, screen_h) = screen.dimensions();
+    let (target_w, target_h) = target.dimensions();
+
+    println!("Screen size: {}x{}, Target size: {}x{}", screen_w, screen_h, target_w, target_h);
+
+    if target_w > screen_w || target_h > screen_h {
+        return Ok(None);
+    }
+
+    let threshold = 50i32; // Порог различия для каждого канала цвета
+    let step = 2; // Шаг поиска - проверяем каждую 2-ю позицию для ускорения
+
+    // Используем Arc для безопасного доступа к изображениям из разных потоков
+    let screen_data = Arc::new(screen_rgba);
+    let target_data = Arc::new(target_rgba);
+    let found = Arc::new(AtomicBool::new(false));
+
+    // Проверяем с разными порогами от 100% до 60%
+    let match_thresholds = [1.00, 0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60];
+
+    for &match_threshold in match_thresholds.iter() {
+        if found.load(Ordering::Relaxed) {
+            break;
+        }
+
+        println!("Searching with threshold {:.0}%...", match_threshold * 100.0);
+
+        // Параллельный поиск по строкам экрана
+        let y_positions: Vec<u32> = (0..=(screen_h - target_h)).step_by(step as usize).collect();
+        let search_result = y_positions
+            .par_iter()
+            .find_map_any(|&y| {
+                // Если уже нашли, прекращаем поиск
+                if found.load(Ordering::Relaxed) {
+                    return None;
+                }
+
+                for x in (0..=(screen_w - target_w)).step_by(step as usize) {
+                    if found.load(Ordering::Relaxed) {
+                        return None;
+                    }
+
+                    // Быстрая проверка: сравниваем только ключевые точки (углы и центр)
+                    let key_points = [
+                        (0, 0),
+                        (target_w / 2, target_h / 2),
+                        (target_w - 1, 0),
+                        (0, target_h - 1),
+                        (target_w - 1, target_h - 1),
+                    ];
+
+                    let mut key_match = true;
+                    for (tx, ty) in key_points.iter() {
+                        let screen_pixel = screen_data.get_pixel(x + tx, y + ty);
+                        let target_pixel = target_data.get_pixel(*tx, *ty);
+
+                        if target_pixel[3] < 128 {
+                            continue;
+                        }
+
+                        let r_diff = (screen_pixel[0] as i32 - target_pixel[0] as i32).abs();
+                        let g_diff = (screen_pixel[1] as i32 - target_pixel[1] as i32).abs();
+                        let b_diff = (screen_pixel[2] as i32 - target_pixel[2] as i32).abs();
+
+                        if r_diff > threshold || g_diff > threshold || b_diff > threshold {
+                            key_match = false;
+                            break;
+                        }
+                    }
+
+                    if !key_match {
+                        continue;
+                    }
+
+                    // Если ключевые точки совпали, проверяем всё изображение с прореживанием
+                    let mut matched_pixels = 0;
+                    let mut total_checked = 0;
+                    let check_step = 2; // Проверяем каждый 2-й пиксель
+
+                    for ty in (0..target_h).step_by(check_step as usize) {
+                        for tx in (0..target_w).step_by(check_step as usize) {
+                            let screen_pixel = screen_data.get_pixel(x + tx, y + ty);
+                            let target_pixel = target_data.get_pixel(tx, ty);
+
+                            if target_pixel[3] < 128 {
+                                matched_pixels += 1;
+                                total_checked += 1;
+                                continue;
+                            }
+
+                            let r_diff = (screen_pixel[0] as i32 - target_pixel[0] as i32).abs();
+                            let g_diff = (screen_pixel[1] as i32 - target_pixel[1] as i32).abs();
+                            let b_diff = (screen_pixel[2] as i32 - target_pixel[2] as i32).abs();
+
+                            if r_diff <= threshold && g_diff <= threshold && b_diff <= threshold {
+                                matched_pixels += 1;
+                            }
+                            total_checked += 1;
+                        }
+                    }
+
+                    let match_rate = matched_pixels as f64 / total_checked as f64;
+
+                    if match_rate >= match_threshold {
+                        found.store(true, Ordering::Relaxed);
+                        println!("Image found at ({}, {}) with match rate: {:.2}% in {:.2}s",
+                            x, y, match_rate * 100.0, start_time.elapsed().as_secs_f64());
+                        return Some(ImageSearchResult {
+                            x: x as i32,
+                            y: y as i32,
+                            match_percentage: match_rate * 100.0,
+                        });
+                    }
+                }
+                None
+            });
+
+        if let Some(res) = search_result {
+            return Ok(Some(res));
+        }
+    }
+
+    let elapsed = start_time.elapsed();
+    println!("Image not found on screen. Search took {:.2}s", elapsed.as_secs_f64());
+    Ok(None)
+}
+
+// Структура для события вывода команды
+#[derive(Serialize, Clone)]
+struct CommandOutputEvent {
+    command_id: String,
+    data: String,
+    stream: String, // "stdout" или "stderr"
+}
+
+// Структура для события завершения команды
+#[derive(Serialize, Clone)]
+struct CommandCompleteEvent {
+    command_id: String,
+    success: bool,
+}
+
+// Команда для выполнения shell команды с потоковым выводом
+#[tauri::command]
+async fn execute_command_stream(
+    command: String,
+    command_id: String,
+    working_directory: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    use tokio::process::Command;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tauri::Emitter;
+
+    println!("Executing command with streaming: {} (working_dir: {:?})", command, working_directory);
+
+    #[cfg(target_os = "linux")]
+    let mut cmd = Command::new("bash");
+    #[cfg(target_os = "linux")]
+    cmd.arg("-c").arg(&command);
+
+    #[cfg(target_os = "windows")]
+    let mut cmd = Command::new("cmd");
+    #[cfg(target_os = "windows")]
+    cmd.args(&["/C", &command]);
+
+    #[cfg(target_os = "macos")]
+    let mut cmd = Command::new("bash");
+    #[cfg(target_os = "macos")]
+    cmd.arg("-c").arg(&command);
+
+    // Устанавливаем рабочую директорию если она указана
+    if let Some(ref working_dir) = working_directory {
+        cmd.current_dir(working_dir);
+    }
+
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn command: {}", e))?;
+
+    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+
+    let command_id_clone1 = command_id.clone();
+    let command_id_clone2 = command_id.clone();
+    let app_handle_clone1 = app_handle.clone();
+    let app_handle_clone2 = app_handle.clone();
+
+    // Читаем stdout в отдельной задаче
+    let stdout_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let event = CommandOutputEvent {
+                command_id: command_id_clone1.clone(),
+                data: line + "\n",
+                stream: "stdout".to_string(),
+            };
+            let _ = app_handle_clone1.emit("command-output", event);
+        }
+    });
+
+    // Читаем stderr в отдельной задаче
+    let stderr_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let event = CommandOutputEvent {
+                command_id: command_id_clone2.clone(),
+                data: line + "\n",
+                stream: "stderr".to_string(),
+            };
+            let _ = app_handle_clone2.emit("command-output", event);
+        }
+    });
+
+    // Ждём завершения обеих задач
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
+
+    // Ждём завершения процесса
+    let status = child.wait().await.map_err(|e| format!("Failed to wait for command: {}", e))?;
+
+    // Отправляем событие завершения
+    let complete_event = CommandCompleteEvent {
+        command_id: command_id.clone(),
+        success: status.success(),
+    };
+    let _ = app_handle.emit("command-complete", complete_event);
+
+    println!("Command {} completed with status: {}", command_id, status.success());
     Ok(())
 }
 
@@ -1895,6 +2296,40 @@ pub fn run() {
                 }
             }
 
+            // Enable media permissions for WebView on Linux
+            #[cfg(target_os = "linux")]
+            {
+                use webkit2gtk::{WebViewExt, SettingsExt, PermissionRequestExt};
+                use webkit2gtk::glib::Cast;
+
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Ok(_) = window.with_webview(|webview| {
+                        use webkit2gtk::WebView;
+                        if let Ok(wv) = webview.inner().clone().downcast::<WebView>() {
+                            // Enable media settings
+                            if let Some(settings) = wv.settings() {
+                                settings.set_enable_media_stream(true);
+                                settings.set_enable_mediasource(true);
+                                settings.set_enable_media(true);
+                                settings.set_enable_media_capabilities(true);
+                                println!("WebView media settings enabled");
+                            }
+
+                            // Handle permission requests - automatically allow all
+                            wv.connect_permission_request(|_webview, request| {
+                                println!("Permission request received: {:?}", request);
+                                request.allow();
+                                true // Stop propagation
+                            });
+
+                            println!("Permission handler installed");
+                        }
+                    }) {
+                        println!("WebView configuration completed");
+                    }
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1902,6 +2337,7 @@ pub fn run() {
             get_cpu_temperature,
             get_network_speed,
             capture_full_screenshot,
+            capture_monitor_screenshot,
             open_area_selector,
             get_stored_screenshot,
             capture_area_screenshot,
@@ -1912,6 +2348,7 @@ pub fn run() {
             get_popup_screen_position,
             close_translation_popup,
             solve_and_click,
+            perform_click,
             move_translation_popup,
             get_translation_popup_position,
             get_window_size,
@@ -1940,7 +2377,9 @@ pub fn run() {
             play_click_sequence,
             get_local_ip,
             start_screen_streaming,
-            stop_screen_streaming
+            stop_screen_streaming,
+            execute_command_stream,
+            find_image_on_screen
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
