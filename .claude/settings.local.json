@@ -22,7 +22,8 @@
       "Bash(netstat:*)",
       "Bash(flatpak list:*)",
       "Bash(wget:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": [
       "Bash(killall:*)"

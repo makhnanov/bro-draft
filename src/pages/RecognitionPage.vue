@@ -1,24 +1,23 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import microphoneService from '../services/microphoneService';
 
 const STORAGE_KEY = 'recognition-active-tab';
 const SEQUENCES_STORAGE_KEY = 'screen-recognition-sequences';
-const AUDIO_DEVICE_STORAGE_KEY = 'selected-audio-device';
 
 const activeTab = ref('voice');
 
-// Voice recognition state
-const audioDevices = ref<MediaDeviceInfo[]>([]);
-const selectedDeviceId = ref<string>('');
-const isListening = ref(false);
-const audioLevel = ref(0);
-let audioContext: AudioContext | null = null;
-let analyser: AnalyserNode | null = null;
-let microphone: MediaStreamAudioSourceNode | null = null;
-let mediaStream: MediaStream | null = null;
-let animationFrameId: number | null = null;
+// Use global microphone service state
+const audioDevices = computed(() => microphoneService.audioDevices.value);
+const selectedDeviceId = computed({
+    get: () => microphoneService.selectedDeviceId.value,
+    set: (value: string) => microphoneService.setSelectedDevice(value)
+});
+const isListening = computed(() => microphoneService.isListening.value);
+const audioLevel = computed(() => microphoneService.audioLevel.value);
+const isMuted = computed(() => microphoneService.isMuted.value);
 
 type ActionType = 'left-click' | 'right-click' | 'double-click' | 'middle-click' | 'text-input';
 
@@ -53,142 +52,25 @@ function setActiveTab(tab: string) {
     localStorage.setItem(STORAGE_KEY, tab);
 }
 
-// Voice recognition functions
+// Voice recognition functions - now using global service
 async function loadAudioDevices() {
     try {
-        console.log('Loading audio devices...');
-
-        // Request permission first to get full device list with labels
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        console.log('Got permission, stream:', stream);
-
-        // Stop the temporary stream
-        stream.getTracks().forEach(track => track.stop());
-
-        // Now enumerate devices - we'll get full labels
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        console.log('All devices:', devices);
-
-        const audioInputs = devices.filter(device => device.kind === 'audioinput');
-        console.log('Audio input devices found:', audioInputs.length, audioInputs);
-
-        audioDevices.value = audioInputs;
-
-        // Load saved device or select first one
-        const savedDeviceId = localStorage.getItem(AUDIO_DEVICE_STORAGE_KEY);
-        if (savedDeviceId && audioDevices.value.some(d => d.deviceId === savedDeviceId)) {
-            selectedDeviceId.value = savedDeviceId;
-        } else if (audioDevices.value.length > 0) {
-            selectedDeviceId.value = audioDevices.value[0].deviceId;
-        }
-
-        console.log('Selected device:', selectedDeviceId.value);
+        await microphoneService.loadAudioDevices();
     } catch (error) {
-        console.error('Failed to enumerate audio devices:', error);
+        console.error('Failed to load audio devices:', error);
         const errorMessage = error instanceof Error ? error.message : String(error);
         alert('Ошибка доступа к устройствам: ' + errorMessage);
-        // If permission denied, still try to get basic device list
-        try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            audioDevices.value = devices.filter(device => device.kind === 'audioinput');
-        } catch (e) {
-            console.error('Failed to get device list:', e);
-        }
     }
 }
 
-async function startListening() {
-    if (!selectedDeviceId.value) {
-        alert('Пожалуйста, выберите устройство ввода');
-        return;
-    }
-
+async function toggleListening() {
     try {
-        // Request microphone access
-        mediaStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                deviceId: selectedDeviceId.value ? { exact: selectedDeviceId.value } : undefined
-            }
-        });
-
-        // Create audio context and analyser
-        audioContext = new AudioContext();
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-        analyser.smoothingTimeConstant = 0.8;
-
-        microphone = audioContext.createMediaStreamSource(mediaStream);
-        microphone.connect(analyser);
-
-        isListening.value = true;
-        updateAudioLevel();
+        await microphoneService.toggleListening();
     } catch (error) {
-        console.error('Failed to start listening:', error);
+        console.error('Failed to toggle listening:', error);
         alert('Ошибка доступа к микрофону: ' + error);
     }
 }
-
-function stopListening() {
-    if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-    }
-
-    if (microphone) {
-        microphone.disconnect();
-        microphone = null;
-    }
-
-    if (analyser) {
-        analyser = null;
-    }
-
-    if (audioContext) {
-        audioContext.close();
-        audioContext = null;
-    }
-
-    if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
-        mediaStream = null;
-    }
-
-    isListening.value = false;
-    audioLevel.value = 0;
-}
-
-function updateAudioLevel() {
-    if (!analyser || !isListening.value) return;
-
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(dataArray);
-
-    // Calculate average volume
-    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-    audioLevel.value = Math.min(100, (average / 255) * 100 * 2); // Scale to 0-100
-
-    animationFrameId = requestAnimationFrame(updateAudioLevel);
-}
-
-function toggleListening() {
-    if (isListening.value) {
-        stopListening();
-    } else {
-        startListening();
-    }
-}
-
-watch(selectedDeviceId, (newDeviceId) => {
-    if (newDeviceId) {
-        localStorage.setItem(AUDIO_DEVICE_STORAGE_KEY, newDeviceId);
-
-        // Restart listening if currently active
-        if (isListening.value) {
-            stopListening();
-            setTimeout(() => startListening(), 100);
-        }
-    }
-});
 
 // Fix double-encoded UTF-8 strings (fixes garbled Cyrillic)
 function fixEncoding(str: string): string {
@@ -215,18 +97,7 @@ function fixEncoding(str: string): string {
 
 // Get device name with proper encoding
 function getDeviceName(device: MediaDeviceInfo): string {
-    if (!device.label) {
-        return `Устройство ${device.deviceId.substring(0, 8)}`;
-    }
-
-    try {
-        // Try to fix encoding
-        const fixed = fixEncoding(device.label);
-        return fixed;
-    } catch (e) {
-        console.error('Failed to fix device name encoding:', e);
-        return device.label;
-    }
+    return microphoneService.getDeviceName(device);
 }
 
 function createNewSequence() {
@@ -447,7 +318,6 @@ onMounted(async () => {
     }
 
     loadSequences();
-    await loadAudioDevices();
 
     // Слушаем событие выбора области
     unlisten = await listen('area-selected', handleAreaSelected);
@@ -458,10 +328,8 @@ onUnmounted(() => {
         unlisten();
     }
 
-    // Stop listening when component unmounts
-    if (isListening.value) {
-        stopListening();
-    }
+    // Note: We don't stop listening here because the microphone service is global
+    // and should continue working across all pages
 });
 </script>
 
@@ -581,6 +449,25 @@ onUnmounted(() => {
                 <div v-if="isListening" class="status-info">
                     <div class="status-indicator"></div>
                     <span>Прослушивание активно</span>
+                </div>
+
+                <!-- Microphone Status (Muted/Unmuted) -->
+                <div v-if="isListening" class="microphone-status" :class="{ muted: isMuted }">
+                    <div class="status-icon">
+                        <svg v-if="!isMuted" viewBox="0 0 24 24" class="mic-icon">
+                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="currentColor"/>
+                            <path d="M19 11c0 3.87-3.13 7-7 7s-7-3.13-7-7M12 18v4m-4 0h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                        </svg>
+                        <svg v-else viewBox="0 0 24 24" class="mic-icon">
+                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="currentColor"/>
+                            <path d="M19 11c0 3.87-3.13 7-7 7s-7-3.13-7-7M12 18v4m-4 0h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                            <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="status-details">
+                        <div class="status-label">Статус микрофона:</div>
+                        <div class="status-value">{{ isMuted ? 'Выключен (Muted)' : 'Активен (Live)' }}</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1020,6 +907,65 @@ onUnmounted(() => {
         opacity 1
     50%
         opacity 0.5
+
+// Microphone status display
+.microphone-status
+    display flex
+    align-items center
+    gap 16px
+    padding 16px 20px
+    background white
+    border-radius 8px
+    border 2px solid #00875A
+    margin-top 16px
+    transition all 0.3s ease
+
+    &.muted
+        border-color #DE350B
+        background #FFEBE6
+
+    .status-icon
+        width 48px
+        height 48px
+        display flex
+        align-items center
+        justify-content center
+        border-radius 50%
+        background #E3FCEF
+        flex-shrink 0
+        transition all 0.3s ease
+
+        .mic-icon
+            width 28px
+            height 28px
+            color #00875A
+
+    &.muted .status-icon
+        background #FFEBE6
+
+        .mic-icon
+            color #DE350B
+
+    .status-details
+        flex 1
+        display flex
+        flex-direction column
+        gap 4px
+
+    .status-label
+        font-size 13px
+        font-weight 600
+        color #6B778C
+        text-transform uppercase
+        letter-spacing 0.5px
+
+    .status-value
+        font-size 18px
+        font-weight 700
+        color #00875A
+
+    &.muted .status-value
+        color #DE350B
 
 .content-placeholder
     display flex

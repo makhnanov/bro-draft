@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Монитор состояния микрофона</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .device-selector {
+            margin-bottom: 30px;
+        }
+
+        .device-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .device-selector select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+
+        .device-selector select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-start {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-start:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-start:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-stop {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            background: #e53e3e;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(245, 101, 101, 0.4);
+        }
+
+        .btn-stop:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .status-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+
+        .status-text {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .status-time {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .status.muted {
+            background: #fed7d7;
+        }
+
+        .status.active {
+            background: #c6f6d5;
+        }
+
+        .visualizer {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .visualizer-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .visualizer-bar-container {
+            height: 40px;
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .visualizer-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #48bb78, #38a169);
+            transition: width 0.1s ease;
+            border-radius: 20px;
+            position: relative;
+        }
+
+        .visualizer-bar.low {
+            background: linear-gradient(90deg, #48bb78, #38a169);
+        }
+
+        .visualizer-bar.medium {
+            background: linear-gradient(90deg, #ed8936, #dd6b20);
+        }
+
+        .visualizer-bar.high {
+            background: linear-gradient(90deg, #f56565, #e53e3e);
+        }
+
+        .visualizer-value {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .settings {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .setting-item {
+            margin-bottom: 16px;
+        }
+
+        .setting-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .setting-item label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .setting-item input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #e0e0e0;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .setting-item input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+
+        .setting-value {
+            display: inline-block;
+            margin-left: 8px;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .log {
+            background: #2d3748;
+            color: #e2e8f0;
+            border-radius: 12px;
+            padding: 16px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 6px;
+            border-radius: 4px;
+        }
+
+        .log-entry.muted {
+            background: rgba(245, 101, 101, 0.2);
+        }
+
+        .log-entry.unmuted {
+            background: rgba(72, 187, 120, 0.2);
+        }
+
+        .log-time {
+            color: #a0aec0;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Монитор микрофона</h1>
+        <p class="subtitle">Отслеживание режима "без звука" в реальном времени</p>
+
+        <div class="device-selector">
+            <label for="deviceSelect">Выберите микрофон:</label>
+            <select id="deviceSelect">
+                <option value="">Загрузка устройств...</option>
+            </select>
+        </div>
+
+        <div class="controls">
+            <button class="btn-start" id="startBtn" onclick="startMonitoring()">▶️ Начать мониторинг</button>
+            <button class="btn-stop" id="stopBtn" onclick="stopMonitoring()" disabled>⏹️ Остановить</button>
+        </div>
+
+        <div class="status" id="status">
+            <div class="status-icon">⚪</div>
+            <div class="status-text">Ожидание запуска</div>
+            <div class="status-time"></div>
+        </div>
+
+        <div class="visualizer">
+            <div class="visualizer-label">Уровень звука:</div>
+            <div class="visualizer-bar-container">
+                <div class="visualizer-bar" id="visualizerBar" style="width: 0%"></div>
+                <div class="visualizer-value" id="visualizerValue">0%</div>
+            </div>
+        </div>
+
+        <div class="settings">
+            <div class="setting-item">
+                <label>
+                    Порог тишины: <span class="setting-value" id="thresholdValue">10</span>
+                </label>
+                <input type="range" id="thresholdSlider" min="1" max="50" value="10" oninput="updateThreshold(this.value)">
+            </div>
+            <div class="setting-item">
+                <label>
+                    Время тишины (сек): <span class="setting-value" id="durationValue">0.5</span>
+                </label>
+                <input type="range" id="durationSlider" min="0.1" max="3" step="0.1" value="0.5" oninput="updateDuration(this.value)">
+            </div>
+        </div>
+
+        <div class="log" id="log">
+            <div class="log-entry">Ожидание запуска мониторинга...</div>
+        </div>
+    </div>
+
+    <script>
+        let audioContext = null;
+        let analyser = null;
+        let microphone = null;
+        let mediaStream = null;
+        let animationId = null;
+        let isMuted = false;
+        let lastSoundTime = Date.now();
+        let threshold = 10;
+        let silenceDuration = 0.5;
+
+        // Load audio devices
+        async function loadDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const audioInputs = devices.filter(d => d.kind === 'audioinput');
+
+                const select = document.getElementById('deviceSelect');
+                select.innerHTML = '';
+
+                if (audioInputs.length === 0) {
+                    select.innerHTML = '<option value="">Нет доступных устройств</option>';
+                    return;
+                }
+
+                audioInputs.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.textContent = device.label || `Устройство ${device.deviceId.substring(0, 8)}`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load devices:', error);
+                addLog('❌ Ошибка загрузки устройств: ' + error.message);
+            }
+        }
+
+        async function startMonitoring() {
+            const deviceId = document.getElementById('deviceSelect').value;
+            if (!deviceId) {
+                alert('Выберите устройство');
+                return;
+            }
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { deviceId: { exact: deviceId } }
+                });
+
+                audioContext = new AudioContext();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                analyser.smoothingTimeConstant = 0.8;
+
+                microphone = audioContext.createMediaStreamSource(mediaStream);
+                microphone.connect(analyser);
+
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('deviceSelect').disabled = true;
+
+                updateStatus('active', '🔊', 'Мониторинг активен', 'Микрофон включен');
+                addLog('✅ Мониторинг запущен');
+
+                lastSoundTime = Date.now();
+                isMuted = false;
+                monitorAudioLevel();
+            } catch (error) {
+                console.error('Failed to start monitoring:', error);
+                addLog('❌ Ошибка запуска: ' + error.message);
+                alert('Ошибка доступа к микрофону: ' + error.message);
+            }
+        }
+
+        function stopMonitoring() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+
+            if (microphone) {
+                microphone.disconnect();
+                microphone = null;
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('deviceSelect').disabled = false;
+
+            updateStatus('', '⚪', 'Мониторинг остановлен', '');
+            updateVisualizer(0);
+            addLog('🛑 Мониторинг остановлен');
+        }
+
+        function monitorAudioLevel() {
+            if (!analyser) return;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+
+            const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+            const level = Math.min(100, (average / 255) * 100);
+
+            updateVisualizer(level);
+
+            // Check mute status
+            if (level > threshold) {
+                lastSoundTime = Date.now();
+                if (isMuted) {
+                    isMuted = false;
+                    onMuteChanged(false);
+                }
+            } else {
+                const silenceTime = (Date.now() - lastSoundTime) / 1000;
+                if (silenceTime >= silenceDuration && !isMuted) {
+                    isMuted = true;
+                    onMuteChanged(true);
+                }
+            }
+
+            animationId = requestAnimationFrame(monitorAudioLevel);
+        }
+
+        function onMuteChanged(muted) {
+            if (muted) {
+                updateStatus('muted', '🔇', 'МИКРОФОН БЕЗ ЗВУКА', 'Muted');
+                addLog('🔇 Микрофон выключен (muted)', 'muted');
+            } else {
+                updateStatus('active', '🔊', 'МИКРОФОН АКТИВЕН', 'Unmuted');
+                addLog('🔊 Микрофон включен (unmuted)', 'unmuted');
+            }
+        }
+
+        function updateStatus(className, icon, text, time) {
+            const status = document.getElementById('status');
+            status.className = 'status ' + className;
+            status.querySelector('.status-icon').textContent = icon;
+            status.querySelector('.status-text').textContent = text;
+            status.querySelector('.status-time').textContent = time;
+        }
+
+        function updateVisualizer(level) {
+            const bar = document.getElementById('visualizerBar');
+            const value = document.getElementById('visualizerValue');
+
+            bar.style.width = level + '%';
+            value.textContent = Math.round(level) + '%';
+
+            bar.className = 'visualizer-bar';
+            if (level < 30) bar.classList.add('low');
+            else if (level < 70) bar.classList.add('medium');
+            else bar.classList.add('high');
+        }
+
+        function updateThreshold(value) {
+            threshold = parseFloat(value);
+            document.getElementById('thresholdValue').textContent = value;
+        }
+
+        function updateDuration(value) {
+            silenceDuration = parseFloat(value);
+            document.getElementById('durationValue').textContent = value;
+        }
+
+        function addLog(message, type = '') {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+
+            const time = new Date().toLocaleTimeString('ru-RU', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                fractionalSecondDigits: 3
+            });
+
+            entry.innerHTML = `<span class="log-time">[${time}]</span>${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+
+            // Keep only last 50 entries
+            while (log.children.length > 50) {
+                log.removeChild(log.firstChild);
+            }
+        }
+
+        // Initialize
+        window.addEventListener('load', async () => {
+            await loadDevices();
+
+            // Request permission to get device labels
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                await loadDevices();
+            } catch (e) {
+                console.log('Permission not granted yet');
+            }
+        });
+    </script>
+</body>
+</html>

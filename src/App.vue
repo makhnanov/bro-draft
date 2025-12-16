@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useRoute, useRouter } from "vue-router";
 import { invoke } from '@tauri-apps/api/core';
+import microphoneService from './services/microphoneService';
 
 const router = useRouter();
 
@@ -48,8 +49,15 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', handleKeydown);
+
+  // Initialize microphone service
+  try {
+    await microphoneService.initialize();
+  } catch (error) {
+    console.error('Failed to initialize microphone service:', error);
+  }
 
   // Глобальный обработчик для Ctrl+PrintScreen - захват скриншота и переключение на Screenshots
   window.addEventListener('translation-hotkey-pressed', async () => {
