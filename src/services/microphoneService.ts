@@ -6,7 +6,7 @@ const LISTENING_ENABLED_STORAGE_KEY = 'microphone-listening-enabled';
 
 // Mute detection settings (based on detector.py)
 const THRESHOLD = 0.00005; // Very low threshold for silence detection
-const SILENCE_LIMIT = 0.3; // Seconds of silence before considering muted
+const SILENCE_LIMIT = 0.15; // Seconds of silence before considering muted
 
 // State
 const audioDevices = ref<MediaDeviceInfo[]>([]);
