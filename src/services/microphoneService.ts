@@ -272,13 +272,46 @@ async function initialize(): Promise<void> {
 }
 
 /**
+ * Fix double-encoded UTF-8 strings (fixes garbled Cyrillic)
+ */
+function fixEncoding(str: string): string {
+    try {
+        // Check if string contains garbled UTF-8 characters
+        if (!/[\u0080-\u00FF]/.test(str)) {
+            return str; // Already correct or ASCII only
+        }
+
+        // Convert string to bytes as if it was Latin-1, then decode as UTF-8
+        const bytes = new Uint8Array(str.length);
+        for (let i = 0; i < str.length; i++) {
+            bytes[i] = str.charCodeAt(i) & 0xFF;
+        }
+
+        // Decode as UTF-8
+        const decoder = new TextDecoder('utf-8');
+        return decoder.decode(bytes);
+    } catch (e) {
+        // If decoding fails, return original
+        return str;
+    }
+}
+
+/**
  * Get device name with encoding fix
  */
 function getDeviceName(device: MediaDeviceInfo): string {
     if (!device.label) {
         return `Устройство ${device.deviceId.substring(0, 8)}`;
     }
-    return device.label;
+
+    try {
+        // Try to fix encoding
+        const fixed = fixEncoding(device.label);
+        return fixed;
+    } catch (e) {
+        console.error('[MicrophoneService] Failed to fix device name encoding:', e);
+        return device.label;
+    }
 }
 
 // Export the service
