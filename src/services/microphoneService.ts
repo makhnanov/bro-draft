@@ -1,4 +1,5 @@
 import { ref, readonly } from 'vue';
+import { playActivationBeep, playDeactivationBeep } from './beepSounds';
 
 // Storage keys
 const AUDIO_DEVICE_STORAGE_KEY = 'selected-audio-device';
@@ -193,6 +194,8 @@ function updateAudioLevel(): void {
         if (isMuted.value) {
             isMuted.value = false;
             console.log('[MicrophoneService] Microphone unmuted (Live)');
+            // Play activation beep sound
+            playActivationBeep();
             notifyMuteChange(false);
         }
     } else {
@@ -201,6 +204,8 @@ function updateAudioLevel(): void {
         if (silenceTime >= SILENCE_LIMIT && !isMuted.value) {
             isMuted.value = true;
             console.log('[MicrophoneService] Microphone muted (Hardware Mute)');
+            // Play deactivation beep sound
+            playDeactivationBeep();
             notifyMuteChange(true);
         }
     }
