@@ -9,7 +9,11 @@ const router = useRouter();
 
 const route = useRoute();
 const isSidebarCollapsed = ref(false);
-const toggleText = ref('BroLauncher');
+
+// Настраиваемый массив названий для циклического переключения
+const menuTitles = ref(['BroLauncher', 'Multitool', 'CandyShop', 'FastestExecutor', 'WorkLife', 'CodeShare']);
+const currentTitleIndex = ref(0);
+const toggleText = computed(() => menuTitles.value[currentTitleIndex.value]);
 
 // Проверяем, является ли текущая страница area-selector или screenshot-popup
 const isAreaSelector = computed(() => route.path === '/area-selector' || route.path === '/screenshot-popup');
@@ -18,7 +22,8 @@ function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
   // Меняем текст только при разворачивании меню (когда текст становится видимым)
   if (!isSidebarCollapsed.value) {
-    toggleText.value = toggleText.value === 'BroLauncher' ? 'Multitool' : 'BroLauncher';
+    // Переключаемся на следующий элемент в массиве циклически
+    currentTitleIndex.value = (currentTitleIndex.value + 1) % menuTitles.value.length;
   }
 }
 
