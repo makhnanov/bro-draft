@@ -380,8 +380,19 @@ async fn open_area_selector(app_handle: tauri::AppHandle, state: tauri::State<'_
         }
     }
 
-    // Небольшая пауза для завершения операций
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // Увеличенная пауза для полного завершения уничтожения окон
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+    // Проверяем, что все окна действительно закрыты
+    for monitor_index in 0..10 {
+        let window_label = format!("area-selector-{}", monitor_index);
+        let mut attempts = 0;
+        while app_handle.get_webview_window(&window_label).is_some() && attempts < 10 {
+            println!("Waiting for window {} to be fully destroyed...", window_label);
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            attempts += 1;
+        }
+    }
 
     // Получаем все экраны
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
@@ -485,10 +496,10 @@ async fn close_all_area_selectors(app_handle: tauri::AppHandle) -> Result<(), St
     loop {
         let window_label = format!("area-selector-{}", monitor_index);
         if let Some(window) = app_handle.get_webview_window(&window_label) {
-            println!("Closing window: {}", window_label);
-            match window.close() {
+            println!("Destroying window: {}", window_label);
+            match window.destroy() {
                 Ok(_) => closed_count += 1,
-                Err(e) => println!("Warning: Failed to close window {}: {}", window_label, e),
+                Err(e) => println!("Warning: Failed to destroy window {}: {}", window_label, e),
             }
             monitor_index += 1;
         } else {
@@ -496,9 +507,9 @@ async fn close_all_area_selectors(app_handle: tauri::AppHandle) -> Result<(), St
         }
     }
     if closed_count > 0 {
-        println!("Closed {} area-selector window(s)", closed_count);
-        // Даём время на закрытие окон
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        println!("Destroyed {} area-selector window(s)", closed_count);
+        // Увеличенная пауза для полного завершения уничтожения окон
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
     } else {
         println!("No area-selector windows to close");
     }
