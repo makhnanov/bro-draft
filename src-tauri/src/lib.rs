@@ -2147,6 +2147,262 @@ fn wait_for_dev_server(url: &str, max_attempts: u32) -> bool {
     false
 }
 
+// Команда для сохранения шаблонов кнопок
+#[tauri::command]
+async fn save_button_templates(templates_json: String) -> Result<(), String> {
+    let home_dir = std::env::var("HOME").map_err(|_| "Failed to get HOME environment variable")?;
+    let app_dir = std::path::PathBuf::from(home_dir).join(".local/share/com.bro.app");
+
+    // Создаём директорию если не существует
+    std::fs::create_dir_all(&app_dir)
+        .map_err(|e| format!("Failed to create app directory: {}", e))?;
+
+    let templates_path = app_dir.join("button_templates.json");
+
+    std::fs::write(&templates_path, templates_json)
+        .map_err(|e| format!("Failed to write templates file: {}", e))?;
+
+    println!("Button templates saved to {:?}", templates_path);
+    Ok(())
+}
+
+// Команда для загрузки шаблонов кнопок
+#[tauri::command]
+async fn load_button_templates() -> Result<String, String> {
+    let home_dir = std::env::var("HOME").map_err(|_| "Failed to get HOME environment variable")?;
+    let templates_path = std::path::PathBuf::from(home_dir).join(".local/share/com.bro.app/button_templates.json");
+
+    if templates_path.exists() {
+        let data = std::fs::read_to_string(&templates_path)
+            .map_err(|e| format!("Failed to read templates file: {}", e))?;
+        Ok(data)
+    } else {
+        // Возвращаем пустой массив если файл не существует
+        Ok("[]".to_string())
+    }
+}
+
+// Команда для показа оверлейной кнопки
+#[tauri::command]
+async fn show_overlay_button(
+    app_handle: tauri::AppHandle,
+    template_id: String,
+    template_name: String,
+) -> Result<(), String> {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+
+    println!("Showing overlay button for template: {}", template_id);
+
+    // Закрываем существующее окно если оно есть
+    if let Some(existing_window) = app_handle.get_webview_window("overlay-button") {
+        println!("Destroying existing overlay button window");
+        let _ = existing_window.destroy();
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
+
+    // Создаём новое окно overlay-button
+    let webview_window = WebviewWindowBuilder::new(
+        &app_handle,
+        "overlay-button",
+        WebviewUrl::App(format!("/index.html#/overlay-button?templateId={}&templateName={}", template_id, template_name).into())
+    )
+    .title("Overlay Button")
+    .inner_size(800.0, 600.0)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .visible(true)
+    .resizable(false)
+    .build()
+    .map_err(|e| format!("Failed to create overlay button window: {}", e))?;
+
+    println!("Overlay button window created");
+
+    let _ = webview_window.set_always_on_top(true);
+    let _ = webview_window.set_focus();
+
+    Ok(())
+}
+
+// Команда для скрытия оверлейной кнопки
+#[tauri::command]
+async fn hide_overlay_button(app_handle: tauri::AppHandle) -> Result<(), String> {
+    println!("Hiding overlay button...");
+
+    if let Some(window) = app_handle.get_webview_window("overlay-button") {
+        println!("Destroying overlay button window");
+        match window.destroy() {
+            Ok(_) => println!("Overlay button window destroyed"),
+            Err(e) => println!("Warning: Failed to destroy overlay button window: {}", e),
+        }
+    } else {
+        println!("No overlay button window to hide");
+    }
+
+    Ok(())
+}
+
+// Команда для выполнения действий кнопки
+#[tauri::command]
+async fn execute_button_actions(template_id: String) -> Result<(), String> {
+    use serde::{Deserialize, Serialize};
+    use enigo::{Enigo, Mouse, Settings, Keyboard, Key};
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[serde(tag = "type")]
+    enum Action {
+        #[serde(rename = "click")]
+        Click { x: i32, y: i32, button: String },
+        #[serde(rename = "keypress")]
+        Keypress { keys: String },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    struct ButtonTemplate {
+        id: String,
+        name: String,
+        actions: Vec<Action>,
+    }
+
+    println!("Executing actions for template: {}", template_id);
+
+    // Читаем шаблоны из localStorage (через файл)
+    let home_dir = std::env::var("HOME").map_err(|_| "Failed to get HOME environment variable")?;
+    let local_storage_path = std::path::PathBuf::from(home_dir).join(".local/share/com.bro.app/button_templates.json");
+
+    // Если файл не существует, пытаемся прочитать из browser localStorage
+    let templates: Vec<ButtonTemplate> = if local_storage_path.exists() {
+        let data = std::fs::read_to_string(&local_storage_path)
+            .map_err(|e| format!("Failed to read templates file: {}", e))?;
+        serde_json::from_str(&data)
+            .map_err(|e| format!("Failed to parse templates: {}", e))?
+    } else {
+        println!("Templates file not found, returning error");
+        return Err("No templates found".to_string());
+    };
+
+    // Находим нужный шаблон
+    let template = templates.iter()
+        .find(|t| t.id == template_id)
+        .ok_or_else(|| format!("Template {} not found", template_id))?;
+
+    println!("Found template '{}' with {} actions", template.name, template.actions.len());
+
+    // Выполняем действия
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("Failed to create Enigo: {}", e))?;
+
+    for (i, action) in template.actions.iter().enumerate() {
+        println!("Executing action {}/{}", i + 1, template.actions.len());
+
+        match action {
+            Action::Click { x, y, button } => {
+                println!("Clicking at ({}, {}) with {} button", x, y, button);
+
+                // Перемещаем курсор
+                let _ = enigo.move_mouse(*x, *y, enigo::Coordinate::Abs);
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+                // Выполняем клик
+                match button.as_str() {
+                    "left" => {
+                        let _ = enigo.button(enigo::Button::Left, enigo::Direction::Press);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                        let _ = enigo.button(enigo::Button::Left, enigo::Direction::Release);
+                    }
+                    "right" => {
+                        let _ = enigo.button(enigo::Button::Right, enigo::Direction::Press);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                        let _ = enigo.button(enigo::Button::Right, enigo::Direction::Release);
+                    }
+                    _ => println!("Unknown button type: {}", button),
+                }
+            }
+            Action::Keypress { keys } => {
+                println!("Pressing keys: {}", keys);
+
+                // Парсим клавиши из строки типа "Ctrl+C"
+                let key_parts: Vec<&str> = keys.split('+').collect();
+                let mut modifiers = Vec::new();
+                let mut main_key = None;
+
+                for part in key_parts.iter() {
+                    match part.trim().to_lowercase().as_str() {
+                        "ctrl" | "control" => modifiers.push(Key::Control),
+                        "alt" => modifiers.push(Key::Alt),
+                        "shift" => modifiers.push(Key::Shift),
+                        "super" | "meta" => modifiers.push(Key::Meta),
+                        key_str => {
+                            // Основная клавиша
+                            main_key = Some(key_str.to_string());
+                        }
+                    }
+                }
+
+                // Нажимаем модификаторы
+                for modifier in &modifiers {
+                    let _ = enigo.key(*modifier, enigo::Direction::Press);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+
+                // Нажимаем основную клавишу
+                if let Some(key_str) = main_key {
+                    // Преобразуем строку в клавишу
+                    let key = match key_str.to_uppercase().as_str() {
+                        "A" => Key::Unicode('a'),
+                        "B" => Key::Unicode('b'),
+                        "C" => Key::Unicode('c'),
+                        "D" => Key::Unicode('d'),
+                        "E" => Key::Unicode('e'),
+                        "F" => Key::Unicode('f'),
+                        "G" => Key::Unicode('g'),
+                        "H" => Key::Unicode('h'),
+                        "I" => Key::Unicode('i'),
+                        "J" => Key::Unicode('j'),
+                        "K" => Key::Unicode('k'),
+                        "L" => Key::Unicode('l'),
+                        "M" => Key::Unicode('m'),
+                        "N" => Key::Unicode('n'),
+                        "O" => Key::Unicode('o'),
+                        "P" => Key::Unicode('p'),
+                        "Q" => Key::Unicode('q'),
+                        "R" => Key::Unicode('r'),
+                        "S" => Key::Unicode('s'),
+                        "T" => Key::Unicode('t'),
+                        "U" => Key::Unicode('u'),
+                        "V" => Key::Unicode('v'),
+                        "W" => Key::Unicode('w'),
+                        "X" => Key::Unicode('x'),
+                        "Y" => Key::Unicode('y'),
+                        "Z" => Key::Unicode('z'),
+                        "ENTER" | "RETURN" => Key::Return,
+                        "TAB" => Key::Tab,
+                        "SPACE" => Key::Space,
+                        "ESCAPE" | "ESC" => Key::Escape,
+                        _ => Key::Unicode(key_str.chars().next().unwrap_or('a')),
+                    };
+
+                    let _ = enigo.key(key, enigo::Direction::Click);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+
+                // Отпускаем модификаторы
+                for modifier in modifiers.iter().rev() {
+                    let _ = enigo.key(*modifier, enigo::Direction::Release);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+            }
+        }
+
+        // Небольшая задержка между действиями
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    println!("All actions executed successfully");
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Wait for dev server in development mode
@@ -2390,7 +2646,12 @@ pub fn run() {
             start_screen_streaming,
             stop_screen_streaming,
             execute_command_stream,
-            find_image_on_screen
+            find_image_on_screen,
+            save_button_templates,
+            load_button_templates,
+            show_overlay_button,
+            hide_overlay_button,
+            execute_button_actions
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

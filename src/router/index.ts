@@ -20,6 +20,8 @@ import NotificationsPage from '../pages/NotificationsPage.vue'
 import KeyboardPage from '../pages/KeyboardPage.vue'
 import StreamingPage from '../pages/StreamingPage.vue'
 import TerminalPage from '../pages/TerminalPage.vue'
+import ButtonsPage from '../pages/ButtonsPage.vue'
+import OverlayButtonPage from '../pages/OverlayButtonPage.vue'
 
 const routes = [
   {
@@ -121,6 +123,16 @@ const routes = [
     path: '/terminal',
     name: 'Terminal',
     component: TerminalPage
+  },
+  {
+    path: '/buttons',
+    name: 'Buttons',
+    component: ButtonsPage
+  },
+  {
+    path: '/overlay-button',
+    name: 'OverlayButton',
+    component: OverlayButtonPage
   }
 ]
 

@@ -15,8 +15,8 @@ const menuTitles = ref(['BroLauncher', 'Multitool', 'CandyShop', 'FastestExecuto
 const currentTitleIndex = ref(0);
 const toggleText = computed(() => menuTitles.value[currentTitleIndex.value]);
 
-// Проверяем, является ли текущая страница area-selector или screenshot-popup
-const isAreaSelector = computed(() => route.path === '/area-selector' || route.path === '/screenshot-popup');
+// Проверяем, является ли текущая страница area-selector, screenshot-popup или overlay-button
+const isAreaSelector = computed(() => route.path === '/area-selector' || route.path === '/screenshot-popup' || route.path === '/overlay-button');
 
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
@@ -244,6 +244,14 @@ onUnmounted(() => {
           <line x1="13" y1="16" x2="18" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
         <span class="nav-text">Terminal</span>
+      </router-link>
+      <router-link to="/buttons" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+          <path d="M12 9v6M9 12h6" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span class="nav-text">Buttons</span>
       </router-link>
       <router-link to="/settings" class="nav-item">
         <svg viewBox="0 0 24 24" class="nav-icon">

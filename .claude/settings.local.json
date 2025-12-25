@@ -23,7 +23,8 @@
       "Bash(flatpak list:*)",
       "Bash(wget:*)",
       "Bash(mv:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(pgrep:*)"
     ],
     "deny": [
       "Bash(killall:*)"
