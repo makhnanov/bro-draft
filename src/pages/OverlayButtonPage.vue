@@ -7,6 +7,9 @@ const templateName = ref('');
 const isDragging = ref(false);
 const position = ref({ x: 100, y: 100 });
 const dragStart = ref({ x: 0, y: 0 });
+const buttonElement = ref<HTMLElement | null>(null);
+let rafId: number | null = null;
+let cursorCheckInterval: number | null = null;
 
 onMounted(async () => {
   // Получаем параметры из URL
@@ -22,10 +25,14 @@ onMounted(async () => {
 
   // Обработчик для закрытия по Escape
   window.addEventListener('keydown', handleEscape);
+
+  // Запускаем отслеживание позиции курсора
+  startCursorTracking();
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleEscape);
+  stopCursorTracking();
 });
 
 function handleEscape(event: KeyboardEvent) {
@@ -44,33 +51,128 @@ async function executeActions() {
   }
 }
 
+// Отслеживание позиции курсора для управления click-through
+function startCursorTracking() {
+  // Используем глобальный mousemove для отслеживания позиции курсора
+  document.addEventListener('mousemove', handleGlobalMouseMove);
+
+  // Также проверяем периодически на случай, если курсор находится над кнопкой, но не движется
+  cursorCheckInterval = window.setInterval(checkCursorPosition, 100);
+}
+
+function stopCursorTracking() {
+  document.removeEventListener('mousemove', handleGlobalMouseMove);
+  if (cursorCheckInterval !== null) {
+    clearInterval(cursorCheckInterval);
+    cursorCheckInterval = null;
+  }
+}
+
+async function handleGlobalMouseMove(event: MouseEvent) {
+  await checkCursorOverButton(event.clientX, event.clientY);
+}
+
+async function checkCursorPosition() {
+  // Получаем текущую позицию курсора через DOM API
+  // Это сработает, только если курсор над окном
+  const button = buttonElement.value;
+  if (!button) return;
+
+  // Проверяем через :hover pseudo-class
+  const isHovered = button.matches(':hover');
+  await setCursorEventsState(!isHovered);
+}
+
+async function checkCursorOverButton(mouseX: number, mouseY: number) {
+  const button = buttonElement.value;
+  if (!button) return;
+
+  const rect = button.getBoundingClientRect();
+  const isOver = (
+    mouseX >= rect.left &&
+    mouseX <= rect.right &&
+    mouseY >= rect.top &&
+    mouseY <= rect.bottom
+  );
+
+  await setCursorEventsState(!isOver);
+}
+
+let currentIgnoreState = false; // Начальное состояние - НЕ игнорируем курсор, чтобы можно было взаимодействовать с кнопкой
+
+async function setCursorEventsState(ignore: boolean) {
+  // Во время перетаскивания всегда включаем события
+  if (isDragging.value && ignore) {
+    ignore = false;
+  }
+
+  // Избегаем лишних вызовов если состояние не изменилось
+  if (currentIgnoreState === ignore) return;
+
+  currentIgnoreState = ignore;
+
+  try {
+    await invoke('set_window_ignore_cursor_events', { ignore });
+  } catch (error) {
+    console.error('Failed to set cursor events:', error);
+  }
+}
+
 function startDrag(event: MouseEvent) {
+  event.preventDefault();
   isDragging.value = true;
   dragStart.value = {
     x: event.clientX - position.value.x,
     y: event.clientY - position.value.y
   };
+
+  // Добавляем глобальные слушатели
+  document.addEventListener('mousemove', onDrag);
+  document.addEventListener('mouseup', stopDrag);
 }
 
 function onDrag(event: MouseEvent) {
-  if (isDragging.value) {
+  if (!isDragging.value) return;
+
+  // Отменяем предыдущий RAF если есть
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId);
+  }
+
+  // Используем requestAnimationFrame для плавного обновления
+  rafId = requestAnimationFrame(() => {
     position.value = {
       x: event.clientX - dragStart.value.x,
       y: event.clientY - dragStart.value.y
     };
-  }
+    rafId = null;
+  });
 }
 
-function stopDrag() {
-  if (isDragging.value) {
-    isDragging.value = false;
-    // Сохраняем позицию
-    localStorage.setItem(`overlay_button_position_${templateId.value}`, JSON.stringify(position.value));
+async function stopDrag() {
+  if (!isDragging.value) return;
+
+  isDragging.value = false;
+
+  // Отменяем RAF если есть
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
   }
+
+  // Удаляем глобальные слушатели
+  document.removeEventListener('mousemove', onDrag);
+  document.removeEventListener('mouseup', stopDrag);
+
+  // Сохраняем позицию
+  localStorage.setItem(`overlay_button_position_${templateId.value}`, JSON.stringify(position.value));
+
+  // Состояние курсора будет автоматически обновлено через cursor tracking
 }
 
 async function closeOverlay() {
   try {
+    // Команда hide_overlay_button теперь сама отправит событие
     await invoke('hide_overlay_button');
   } catch (error) {
     console.error('Error hiding overlay:', error);
@@ -79,8 +181,9 @@ async function closeOverlay() {
 </script>
 
 <template>
-  <div class="overlay" @mousemove="onDrag" @mouseup="stopDrag">
+  <div class="overlay">
     <div
+      ref="buttonElement"
       class="overlay-button"
       :style="{
         left: position.x + 'px',
@@ -109,7 +212,7 @@ async function closeOverlay() {
   height 100vh
   background transparent
   z-index 999999
-  pointer-events auto
+  pointer-events none
   user-select none
 
 .overlay-button
@@ -123,6 +226,7 @@ async function closeOverlay() {
   box-shadow 0 4px 20px rgba(0, 0, 0, 0.3)
   cursor move
   transition box-shadow 0.2s ease
+  pointer-events auto
 
   &:hover
     box-shadow 0 6px 30px rgba(0, 0, 0, 0.4)

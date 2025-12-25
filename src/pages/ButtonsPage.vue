@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 // Типы действий
@@ -38,6 +38,9 @@ const recordedClicks = ref<ClickAction[]>([]);
 
 // Для ввода горячих клавиш
 const hotkey = ref('');
+const isEditingName = ref<string | null>(null);
+const editingName = ref('');
+const isCapturingKeys = ref(false); // Режим перехвата клавиш
 
 // Загрузка шаблонов из файловой системы
 onMounted(async () => {
@@ -49,7 +52,21 @@ onMounted(async () => {
   } catch (error) {
     console.error('Failed to load templates:', error);
   }
+
+  // Слушаем событие закрытия оверлейной кнопки
+  window.addEventListener('overlay-button-closed', handleOverlayClosed);
 });
+
+onUnmounted(() => {
+  window.removeEventListener('overlay-button-closed', handleOverlayClosed);
+});
+
+// Обработчик закрытия оверлея
+function handleOverlayClosed() {
+  // Деактивируем все кнопки
+  templates.value.forEach(t => t.isActive = false);
+  saveTemplates();
+}
 
 // Сохранение шаблонов
 async function saveTemplates() {
@@ -96,6 +113,28 @@ function deleteTemplate(id: string) {
 // Начать редактирование шаблона
 function editTemplate(template: ButtonTemplate) {
   editingTemplate.value = template;
+}
+
+// Начать редактирование названия
+function startEditingName(template: ButtonTemplate) {
+  isEditingName.value = template.id;
+  editingName.value = template.name;
+}
+
+// Сохранить новое название
+function saveTemplateName(template: ButtonTemplate) {
+  if (editingName.value.trim()) {
+    template.name = editingName.value.trim();
+    saveTemplates();
+  }
+  isEditingName.value = null;
+  editingName.value = '';
+}
+
+// Отменить редактирование названия
+function cancelEditingName() {
+  isEditingName.value = null;
+  editingName.value = '';
 }
 
 // Добавить действие клика
@@ -222,8 +261,12 @@ async function deactivateButton(template: ButtonTemplate) {
   }
 }
 
-// Обработка нажатия клавиш для ввода hotkey
+// Обработка нажатия клавиш для ввода hotkey (только в режиме перехвата)
 function handleHotkeyInput(event: KeyboardEvent) {
+  if (!isCapturingKeys.value) {
+    return; // В режиме текстового ввода не перехватываем
+  }
+
   event.preventDefault();
 
   const keys = [];
@@ -234,7 +277,12 @@ function handleHotkeyInput(event: KeyboardEvent) {
 
   // Добавляем основную клавишу
   if (event.key && !['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) {
-    keys.push(event.key.toUpperCase());
+    // Обрабатываем специальные клавиши
+    const keyName = event.key === ' ' ? 'Space' :
+                    event.key === 'Escape' ? 'Esc' :
+                    event.key.length === 1 ? event.key.toUpperCase() :
+                    event.key;
+    keys.push(keyName);
   }
 
   if (keys.length > 0) {
@@ -268,7 +316,22 @@ function exportTemplate(template: ButtonTemplate) {
       <div class="template-list">
         <div v-for="template in templates" :key="template.id" class="template-item">
           <div class="template-header">
-            <h3 class="template-name">{{ template.name }}</h3>
+            <div v-if="isEditingName === template.id" class="template-name-edit">
+              <input
+                v-model="editingName"
+                type="text"
+                class="name-input"
+                @keyup.enter="saveTemplateName(template)"
+                @keyup.esc="cancelEditingName"
+                autofocus
+              />
+              <button @click="saveTemplateName(template)" class="btn btn-save-name">✓</button>
+              <button @click="cancelEditingName" class="btn btn-cancel-name">✕</button>
+            </div>
+            <h3 v-else class="template-name" @dblclick="startEditingName(template)">
+              {{ template.name }}
+              <span class="edit-hint" @click="startEditingName(template)">✏️</span>
+            </h3>
             <div class="template-actions">
               <button
                 v-if="!template.isActive"
@@ -384,13 +447,30 @@ function exportTemplate(template: ButtonTemplate) {
 
         <!-- Добавление горячих клавиш -->
         <div v-if="actionType === 'keypress'" class="action-form">
+          <p class="hint-text">Введите сочетание клавиш (например: Ctrl+C, Alt+Tab, Print Screen, F12)</p>
+
+          <div class="key-input-mode">
+            <button
+              :class="['mode-btn', { active: !isCapturingKeys }]"
+              @click="isCapturingKeys = false"
+            >
+              ⌨️ Текстовый ввод
+            </button>
+            <button
+              :class="['mode-btn', { active: isCapturingKeys }]"
+              @click="isCapturingKeys = true; hotkey = ''"
+            >
+              🎯 Перехват клавиш
+            </button>
+          </div>
+
           <input
             v-model="hotkey"
             type="text"
-            placeholder="Нажмите сочетание клавиш..."
+            :placeholder="isCapturingKeys ? 'Нажмите клавиши...' : 'Введите текстом (например: Print Screen, F12)'"
             class="text-input"
             @keydown="handleHotkeyInput"
-            readonly
+            :readonly="isCapturingKeys"
           />
           <button @click="addKeypressAction" class="btn btn-primary">Добавить</button>
         </div>
@@ -456,6 +536,92 @@ function exportTemplate(template: ButtonTemplate) {
   font-size 18px
   font-weight 600
   color #172B4D
+  display flex
+  align-items center
+  gap 8px
+  cursor pointer
+  transition color 0.2s ease
+
+  &:hover
+    color #0052cc
+
+  .edit-hint
+    font-size 14px
+    opacity 0.5
+    cursor pointer
+    transition opacity 0.2s ease
+
+    &:hover
+      opacity 1
+
+.template-name-edit
+  display flex
+  align-items center
+  gap 8px
+
+.name-input
+  padding 8px 12px
+  border 2px solid #0052cc
+  border-radius 6px
+  font-size 16px
+  font-weight 600
+  color #172B4D
+  min-width 300px
+
+  &:focus
+    outline none
+    border-color #0052cc
+
+.btn-save-name
+  padding 6px 12px
+  background #00875A
+  color white
+  font-size 16px
+
+  &:hover
+    background #006644
+
+.btn-cancel-name
+  padding 6px 12px
+  background #DE350B
+  color white
+  font-size 16px
+
+  &:hover
+    background #BF2600
+
+.hint-text
+  font-size 13px
+  color #6B778C
+  margin-bottom 8px
+  line-height 1.5
+
+.key-input-mode
+  display flex
+  gap 8px
+  margin-bottom 12px
+
+.mode-btn
+  flex 1
+  padding 10px 16px
+  background #DFE1E6
+  color #172B4D
+  border none
+  border-radius 6px
+  font-size 14px
+  font-weight 500
+  cursor pointer
+  transition all 0.2s ease
+
+  &:hover
+    background #C1C7D0
+
+  &.active
+    background #0052cc
+    color white
+
+    &:hover
+      background #0747a6
 
 .template-actions
   display flex

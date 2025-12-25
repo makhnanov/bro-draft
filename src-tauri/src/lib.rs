@@ -2201,14 +2201,21 @@ async fn show_overlay_button(
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
 
-    // Создаём новое окно overlay-button
+    // Получаем размеры экрана
+    use screenshots::Screen;
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+    let primary_screen = screens.first().ok_or("No primary screen found")?;
+    let display = primary_screen.display_info;
+
+    // Создаём новое окно overlay-button на весь экран
     let webview_window = WebviewWindowBuilder::new(
         &app_handle,
         "overlay-button",
         WebviewUrl::App(format!("/index.html#/overlay-button?templateId={}&templateName={}", template_id, template_name).into())
     )
     .title("Overlay Button")
-    .inner_size(800.0, 600.0)
+    .position(display.x as f64, display.y as f64)
+    .inner_size(display.width as f64, display.height as f64)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -2218,11 +2225,25 @@ async fn show_overlay_button(
     .build()
     .map_err(|e| format!("Failed to create overlay button window: {}", e))?;
 
-    println!("Overlay button window created");
+    println!("Overlay button window created ({}x{} at {}, {})",
+        display.width, display.height, display.x, display.y);
 
     let _ = webview_window.set_always_on_top(true);
-    let _ = webview_window.set_focus();
 
+    // Окно начинается в обычном режиме - frontend сам управляет ignore_cursor_events
+    // через команду set_window_ignore_cursor_events
+
+    Ok(())
+}
+
+// Команда для управления игнорированием событий мыши
+#[tauri::command]
+async fn set_window_ignore_cursor_events(app_handle: tauri::AppHandle, ignore: bool) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("overlay-button") {
+        window.set_ignore_cursor_events(ignore)
+            .map_err(|e| format!("Failed to set ignore cursor events: {}", e))?;
+        println!("Set ignore cursor events: {}", ignore);
+    }
     Ok(())
 }
 
@@ -2239,6 +2260,11 @@ async fn hide_overlay_button(app_handle: tauri::AppHandle) -> Result<(), String>
         }
     } else {
         println!("No overlay button window to hide");
+    }
+
+    // Отправляем событие в главное окно
+    if let Some(main_window) = app_handle.get_webview_window("main") {
+        let _ = main_window.eval("window.dispatchEvent(new CustomEvent('overlay-button-closed'))");
     }
 
     Ok(())
@@ -2380,6 +2406,29 @@ async fn execute_button_actions(template_id: String) -> Result<(), String> {
                         "TAB" => Key::Tab,
                         "SPACE" => Key::Space,
                         "ESCAPE" | "ESC" => Key::Escape,
+                        "F1" => Key::F1,
+                        "F2" => Key::F2,
+                        "F3" => Key::F3,
+                        "F4" => Key::F4,
+                        "F5" => Key::F5,
+                        "F6" => Key::F6,
+                        "F7" => Key::F7,
+                        "F8" => Key::F8,
+                        "F9" => Key::F9,
+                        "F10" => Key::F10,
+                        "F11" => Key::F11,
+                        "F12" => Key::F12,
+                        "DELETE" | "DEL" => Key::Delete,
+                        "BACKSPACE" => Key::Backspace,
+                        "HOME" => Key::Home,
+                        "END" => Key::End,
+                        "PAGEUP" | "PAGE UP" => Key::PageUp,
+                        "PAGEDOWN" | "PAGE DOWN" => Key::PageDown,
+                        "INSERT" | "INS" => Key::Insert,
+                        "ARROWUP" | "UP" => Key::UpArrow,
+                        "ARROWDOWN" | "DOWN" => Key::DownArrow,
+                        "ARROWLEFT" | "LEFT" => Key::LeftArrow,
+                        "ARROWRIGHT" | "RIGHT" => Key::RightArrow,
                         _ => Key::Unicode(key_str.chars().next().unwrap_or('a')),
                     };
 
@@ -2651,6 +2700,7 @@ pub fn run() {
             load_button_templates,
             show_overlay_button,
             hide_overlay_button,
+            set_window_ignore_cursor_events,
             execute_button_actions
         ])
         .run(tauri::generate_context!())

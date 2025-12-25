@@ -24,7 +24,9 @@
       "Bash(wget:*)",
       "Bash(mv:*)",
       "Bash(mkdir:*)",
-      "Bash(pgrep:*)"
+      "Bash(pgrep:*)",
+      "Bash(pnpm tauri build:*)",
+      "Bash(kill:*)"
     ],
     "deny": [
       "Bash(killall:*)"
