@@ -1,4 +1,4 @@
-use tauri::Manager;
+use tauri::{Manager, WindowSizeConstraints};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use std::time::Duration;
 use sysinfo::Components;
@@ -2191,6 +2191,11 @@ async fn show_overlay_button(
 ) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
     use tauri::WebviewUrl;
+    use tauri::WindowSizeConstraints;
+    use tauri::LogicalSize;
+    use tauri::PixelUnit;
+    use tauri::LogicalUnit;
+
 
     println!("Showing overlay button for template: {}", template_id);
 
@@ -2227,8 +2232,15 @@ async fn show_overlay_button(
     let display = &current_screen.display_info;
 
     // Начальная позиция - центр текущего монитора
-    let initial_x = display.x as f64 + (display.width as f64 / 2.0) - 100.0;
-    let initial_y = display.y as f64 + (display.height as f64 / 2.0) - 25.0;
+    // let initial_x = display.x as f64 + (display.width as f64 / 2.0) - 100.0;
+    // let initial_y = display.y as f64 + (display.height as f64 / 2.0) - 25.0;
+
+    let constraints = WindowSizeConstraints {
+        min_width: Some(PixelUnit::Logical(LogicalUnit(100.0))),
+        min_height: Some(PixelUnit::Logical(LogicalUnit(30.0))),
+        max_width: Some(PixelUnit::Logical(LogicalUnit(100.0))),
+        max_height: Some(PixelUnit::Logical(LogicalUnit(30.0))),
+    };
 
     let webview_window = WebviewWindowBuilder::new(
         &app_handle,
@@ -2236,20 +2248,24 @@ async fn show_overlay_button(
         WebviewUrl::App(format!("/index.html#/overlay-button?templateId={}&templateName={}", template_id, template_name).into())
     )
     .title("Overlay Button")
-    .position(initial_x, initial_y)
-    .inner_size(300.0, 80.0)
+    // .position(initial_x, initial_y)
+    .min_inner_size(100.0, 30.0)
+    .max_inner_size(100.0, 30.0)
+    .inner_size_constraints(constraints)
+    .inner_size(100.0, 30.0)
     .decorations(false)
     .transparent(true)
-    .always_on_top(true)
+    .always_on_top(false)
     .skip_taskbar(true)
     .visible(true)
-    .resizable(true)
-    .focused(false)
+    .resizable(false)
+    // .focused(uefalse)
     .devtools(true)
     .build()
-    .map_err(|e| format!("Failed to create overlay button window: {}", e))?;
+    .unwrap();
+    // .map_err(|e| format!("Failed to create overlay button window: {}", e))?;
 
-    println!("Overlay button window created at {}, {}", initial_x, initial_y);
+    // println!("Overlay button window created at {}, {}", initial_x, initial_y);
 
     let _ = webview_window.set_always_on_top(true);
 

@@ -45,7 +45,7 @@ onMounted(async () => {
     await window.setSize(new LogicalSize(width, height));
 
     // Отключаем resizable после подстройки
-    await window.setResizable(false);
+    await window.setResizable(true);
 
     console.log('[OverlayButton] Window resized successfully');
   } catch (error) {
@@ -83,7 +83,7 @@ async function closeOverlay() {
 </script>
 
 <template>
-  <div class="overlay-button" data-tauri-drag-region>
+  <div class="overlay-button">
     <div class="drag-handle" data-tauri-drag-region>
       ⋮⋮
     </div>
