@@ -2198,52 +2198,61 @@ async fn show_overlay_button(
     if let Some(existing_window) = app_handle.get_webview_window("overlay-button") {
         println!("Destroying existing overlay button window");
         let _ = existing_window.destroy();
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
 
-    // Получаем размеры экрана
+    // Получаем позицию главного окна для определения текущего монитора
+    let main_window = app_handle.get_webview_window("main")
+        .ok_or("Main window not found")?;
+
+    let main_window_position = main_window.outer_position()
+        .map_err(|e| format!("Failed to get main window position: {}", e))?;
+
+    // Получаем все экраны
     use screenshots::Screen;
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
-    let primary_screen = screens.first().ok_or("No primary screen found")?;
-    let display = primary_screen.display_info;
 
-    // Создаём новое окно overlay-button на весь экран
+    // Находим монитор, на котором находится главное окно
+    let current_screen = screens.iter()
+        .find(|screen| {
+            let display = &screen.display_info;
+            main_window_position.x >= display.x &&
+            main_window_position.x < display.x + display.width as i32 &&
+            main_window_position.y >= display.y &&
+            main_window_position.y < display.y + display.height as i32
+        })
+        .or_else(|| screens.first())
+        .ok_or("No screen found")?;
+
+    let display = &current_screen.display_info;
+
+    // Начальная позиция - центр текущего монитора
+    let initial_x = display.x as f64 + (display.width as f64 / 2.0) - 100.0;
+    let initial_y = display.y as f64 + (display.height as f64 / 2.0) - 25.0;
+
     let webview_window = WebviewWindowBuilder::new(
         &app_handle,
         "overlay-button",
         WebviewUrl::App(format!("/index.html#/overlay-button?templateId={}&templateName={}", template_id, template_name).into())
     )
     .title("Overlay Button")
-    .position(display.x as f64, display.y as f64)
-    .inner_size(display.width as f64, display.height as f64)
+    .position(initial_x, initial_y)
+    .inner_size(300.0, 80.0)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
     .visible(true)
-    .resizable(false)
+    .resizable(true)
+    .focused(false)
+    .devtools(true)
     .build()
     .map_err(|e| format!("Failed to create overlay button window: {}", e))?;
 
-    println!("Overlay button window created ({}x{} at {}, {})",
-        display.width, display.height, display.x, display.y);
+    println!("Overlay button window created at {}, {}", initial_x, initial_y);
 
     let _ = webview_window.set_always_on_top(true);
 
-    // Окно начинается в обычном режиме - frontend сам управляет ignore_cursor_events
-    // через команду set_window_ignore_cursor_events
-
-    Ok(())
-}
-
-// Команда для управления игнорированием событий мыши
-#[tauri::command]
-async fn set_window_ignore_cursor_events(app_handle: tauri::AppHandle, ignore: bool) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("overlay-button") {
-        window.set_ignore_cursor_events(ignore)
-            .map_err(|e| format!("Failed to set ignore cursor events: {}", e))?;
-        println!("Set ignore cursor events: {}", ignore);
-    }
     Ok(())
 }
 
@@ -2700,7 +2709,6 @@ pub fn run() {
             load_button_templates,
             show_overlay_button,
             hide_overlay_button,
-            set_window_ignore_cursor_events,
             execute_button_actions
         ])
         .run(tauri::generate_context!())

@@ -4,8 +4,6 @@
       "Bash(make start-development:*)",
       "Bash(cargo build:*)",
       "Bash(chmod:*)",
-      "Bash(sudo apt-get update:*)",
-      "Bash(sudo apt-get install:*)",
       "Bash(npm install)",
       "Bash(ffmpeg:*)",
       "Bash(npm run build:*)",
@@ -15,7 +13,6 @@
       "Bash(make)",
       "Bash(cargo check:*)",
       "Bash(pnpm tauri dev:*)",
-      "Bash(pkill:*)",
       "Bash(systemctl:*)",
       "Bash(xrandr --listmonitors:*)",
       "Bash(sudo dpkg:*)",
@@ -25,11 +22,14 @@
       "Bash(mv:*)",
       "Bash(mkdir:*)",
       "Bash(pgrep:*)",
-      "Bash(pnpm tauri build:*)",
-      "Bash(kill:*)"
+      "Bash(pnpm tauri build:*)"
     ],
     "deny": [
-      "Bash(killall:*)"
+      "Bash(killall:*)",
+      "Bash(kill:*)",
+      "Bash(pkill:*)",
+      "Bash(sudo apt-get update:*)",
+      "Bash(sudo apt-get install:*)"
     ],
     "ask": []
   }
