@@ -435,18 +435,24 @@ onUnmounted(async () => {
                                     </svg>
                                 </div>
                                 <div class="command-inputs">
-                                    <input
-                                        :value="cmd.command"
-                                        @input="updateCommand(project.id, cmd.id, 'command', ($event.target as HTMLInputElement).value)"
-                                        class="command-input"
-                                        placeholder="Command (e.g. npm run dev)"
-                                    />
-                                    <input
-                                        :value="cmd.workingDirectory"
-                                        @input="updateCommand(project.id, cmd.id, 'workingDirectory', ($event.target as HTMLInputElement).value)"
-                                        class="workdir-input"
-                                        placeholder="Working directory (optional)"
-                                    />
+                                    <div class="input-group command-group">
+                                        <label class="input-label">Command</label>
+                                        <input
+                                            :value="cmd.command"
+                                            @input="updateCommand(project.id, cmd.id, 'command', ($event.target as HTMLInputElement).value)"
+                                            class="command-input"
+                                            placeholder="e.g. npm run dev"
+                                        />
+                                    </div>
+                                    <div class="input-group workdir-group">
+                                        <label class="input-label">Working Directory</label>
+                                        <input
+                                            :value="cmd.workingDirectory"
+                                            @input="updateCommand(project.id, cmd.id, 'workingDirectory', ($event.target as HTMLInputElement).value)"
+                                            class="workdir-input"
+                                            placeholder="e.g. /home/user/project"
+                                        />
+                                    </div>
                                 </div>
                                 <button @click="deleteCommand(project.id, cmd.id)" class="btn-delete-cmd" title="Delete">
                                     <svg viewBox="0 0 24 24" class="icon">
@@ -720,8 +726,26 @@ onUnmounted(async () => {
 .command-inputs
     flex 1
     display flex
+    flex-direction row
+    gap 12px
+
+.input-group
+    display flex
     flex-direction column
-    gap 8px
+    gap 4px
+
+.command-group
+    flex 1
+
+.workdir-group
+    flex 0 0 20%
+    min-width 150px
+
+.input-label
+    font-size 12px
+    font-weight 600
+    color #666
+    padding-left 2px
 
 .command-input
 .workdir-input

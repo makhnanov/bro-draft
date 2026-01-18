@@ -785,6 +785,42 @@ function refitAllTerminals() {
     }
 }
 
+async function restartAllTerminals() {
+    const terminals = getAllTerminalNodes(layout.value);
+    for (const node of terminals) {
+        const cmd = node.command;
+        if (cmd?.sessionId && cmd.command) {
+            // Send Ctrl+C to interrupt current process
+            await invoke('write_to_pty', { sessionId: cmd.sessionId, data: '\x03' });
+        }
+    }
+    // Small delay to let processes terminate
+    await new Promise(resolve => setTimeout(resolve, 100));
+    for (const node of terminals) {
+        const cmd = node.command;
+        if (cmd?.sessionId && cmd.command) {
+            // Re-run the command
+            await invoke('write_to_pty', { sessionId: cmd.sessionId, data: cmd.command + '\n' });
+        }
+    }
+}
+
+async function restartTerminal(cmd: Command) {
+    if (!cmd.sessionId || !cmd.command) return;
+
+    // Send Ctrl+C to interrupt
+    await invoke('write_to_pty', { sessionId: cmd.sessionId, data: '\x03' });
+
+    // Wait for process to terminate, send additional Ctrl+C if needed
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await invoke('write_to_pty', { sessionId: cmd.sessionId, data: '\x03' });
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Send arrow up + Enter to repeat last command
+    await invoke('write_to_pty', { sessionId: cmd.sessionId, data: '\x1b[A\r' });
+}
+
 function getTerminalDropPosition(nodeId: string): string | null {
     if (dropTarget.value?.type === 'terminal' && dropTarget.value?.nodeId === nodeId) {
         return dropTarget.value.position;
@@ -1023,6 +1059,14 @@ onUnmounted(async () => {
                                         <button @click="addTerminal(grandchild)" class="btn-add" title="Add terminal">+</button>
                                     </div>
                                     <div :id="`terminal-${grandchild.command.id}`" class="terminal-content"></div>
+                                    <button
+                                        v-if="grandchild.command.command"
+                                        @click="restartTerminal(grandchild.command)"
+                                        class="restart-terminal-btn"
+                                        title="Restart terminal"
+                                    >
+                                        <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/></svg>
+                                    </button>
                                     <div class="drop-indicator drop-indicator-left"></div>
                                     <div class="drop-indicator drop-indicator-right"></div>
                                     <div class="drop-indicator drop-indicator-top"></div>
@@ -1059,6 +1103,14 @@ onUnmounted(async () => {
                                 <button @click="addTerminal(child)" class="btn-add" title="Add terminal">+</button>
                             </div>
                             <div :id="`terminal-${child.command.id}`" class="terminal-content"></div>
+                            <button
+                                v-if="child.command.command"
+                                @click="restartTerminal(child.command)"
+                                class="restart-terminal-btn"
+                                title="Restart terminal"
+                            >
+                                <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/></svg>
+                            </button>
                             <div class="drop-indicator drop-indicator-left"></div>
                             <div class="drop-indicator drop-indicator-right"></div>
                             <div class="drop-indicator drop-indicator-top"></div>
@@ -1094,6 +1146,14 @@ onUnmounted(async () => {
                         <button @click="addTerminal(layout!)" class="btn-add" title="Add terminal">+</button>
                     </div>
                     <div :id="`terminal-${layout.command.id}`" class="terminal-content"></div>
+                    <button
+                        v-if="layout.command.command"
+                        @click="restartTerminal(layout.command)"
+                        class="restart-terminal-btn"
+                        title="Restart terminal"
+                    >
+                        <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/></svg>
+                    </button>
                     <div class="drop-indicator drop-indicator-left"></div>
                     <div class="drop-indicator drop-indicator-right"></div>
                     <div class="drop-indicator drop-indicator-top"></div>
@@ -1106,6 +1166,14 @@ onUnmounted(async () => {
             <div class="edge-indicator edge-indicator-top"></div>
             <div class="edge-indicator edge-indicator-bottom"></div>
         </div>
+
+        <!-- Restart All Button -->
+        <button class="restart-all-btn" @click="restartAllTerminals" title="Restart all terminals">
+            <svg viewBox="0 0 24 24" class="restart-icon">
+                <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/>
+            </svg>
+            <span>All</span>
+        </button>
     </div>
 </template>
 
@@ -1300,6 +1368,84 @@ onUnmounted(async () => {
 .icon
     width 16px
     height 16px
+
+.restart-all-btn
+    position absolute
+    top 50%
+    left 50%
+    transform translate(-50%, -50%)
+    display flex
+    align-items center
+    gap 6px
+    padding 8px 14px
+    background rgba(60, 60, 60, 0.9)
+    border 1px solid #555
+    border-radius 20px
+    color #ccc
+    font-size 12px
+    font-weight 500
+    cursor pointer
+    transition all 0.2s ease
+    z-index 100
+    backdrop-filter blur(4px)
+    outline none
+
+    &:hover
+        background rgba(80, 80, 80, 0.95)
+        border-color #9a8b7a
+        color #fff
+
+    &:focus-visible
+        border-color #9a8b7a
+        box-shadow 0 0 0 2px rgba(154, 139, 122, 0.25)
+
+    &:active
+        transform translate(-50%, -50%) scale(0.95)
+        border-color #b0a090
+
+.restart-icon
+    width 16px
+    height 16px
+
+.restart-terminal-btn
+    position absolute
+    right 28px
+    top 48px
+    width 28px
+    height 28px
+    display flex
+    align-items center
+    justify-content center
+    background rgba(60, 60, 60, 0.85)
+    border 1px solid #555
+    border-radius 50%
+    color #999
+    cursor pointer
+    transition all 0.2s ease
+    z-index 10
+    opacity 0
+    outline none
+
+    svg
+        width 14px
+        height 14px
+
+    .terminal-window:hover &
+        opacity 1
+
+    &:hover
+        background rgba(80, 80, 80, 0.95)
+        border-color #9a8b7a
+        color #fff
+
+    &:focus-visible
+        opacity 1
+        border-color #9a8b7a
+        box-shadow 0 0 0 2px rgba(154, 139, 122, 0.25)
+
+    &:active
+        transform scale(0.9)
+        border-color #b0a090
 </style>
 
 <style lang="stylus">
