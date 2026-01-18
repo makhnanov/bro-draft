@@ -20,12 +20,20 @@ interface SavedLayout {
     children?: SavedLayout[];
 }
 
+interface WindowState {
+    width: number;
+    height: number;
+    x: number;
+    y: number;
+}
+
 interface Project {
     id: number;
     name: string;
     commands: Command[];
     isRunning: boolean;
     layout?: SavedLayout | null;
+    windowState?: WindowState | null;
 }
 
 const projects = ref<Project[]>([]);
@@ -44,6 +52,7 @@ function loadProjects() {
                 ...p,
                 isRunning: false,
                 layout: p.layout || null,
+                windowState: p.windowState || null,
                 commands: p.commands.map((c: any) => ({
                     ...c,
                     isRunning: false,
@@ -66,6 +75,7 @@ function saveProjects() {
             workingDirectory: c.workingDirectory,
         })),
         layout: p.layout || null,
+        windowState: p.windowState || null,
     }));
     localStorage.setItem('terminal_projects_v4', JSON.stringify(toSave));
 }
@@ -92,6 +102,7 @@ function onStorageChange(event: StorageEvent) {
                     });
                     project.commands = newCommands;
                     project.layout = savedProject.layout || null;
+                    project.windowState = savedProject.windowState || null;
                 }
             }
         } catch (e) {
@@ -190,16 +201,29 @@ async function openProjectPopup(project: Project) {
 
         const url = `index.html#/terminal-project-popup?${params.toString()}`;
 
-        const webview = new WebviewWindow(popupLabel, {
+        // Use saved window state or defaults
+        const ws = project.windowState;
+        console.log('[MAIN] Opening popup, saved windowState:', ws);
+        const windowOptions: any = {
             url: url,
             title: project.name,
-            width: 1200,
-            height: 800,
+            width: ws?.width || 1200,
+            height: ws?.height || 800,
             resizable: true,
-            center: true,
             decorations: false,
             backgroundColor: '#2d2d30',
-        });
+        };
+
+        // If we have saved position, use it; otherwise center
+        if (ws?.x !== undefined && ws?.y !== undefined) {
+            windowOptions.x = ws.x;
+            windowOptions.y = ws.y;
+        } else {
+            windowOptions.center = true;
+        }
+        console.log('[MAIN] Window options:', windowOptions);
+
+        const webview = new WebviewWindow(popupLabel, windowOptions);
 
         // Store popup label on project level
         for (const cmd of project.commands) {

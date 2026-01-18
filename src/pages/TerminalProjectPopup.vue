@@ -873,6 +873,26 @@ async function addTerminal(afterNode: LayoutNode) {
 onMounted(async () => {
     await updateWindowTitle();
 
+    // Save window state on resize and move
+    const win = getCurrentWindow();
+    let saveTimeout: number | null = null;
+    const debouncedSaveWindowState = () => {
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+            saveWindowState();
+        }, 500) as unknown as number;
+    };
+
+    win.onResized(() => {
+        console.log('[POPUP] Window resized');
+        debouncedSaveWindowState();
+    });
+
+    win.onMoved(() => {
+        console.log('[POPUP] Window moved');
+        debouncedSaveWindowState();
+    });
+
     outputUnlisten = await listen<PtyOutputEvent>('pty-output', (event) => {
         const cmd = sessionToCmd.get(event.payload.session_id);
         if (cmd && cmd.terminal) {
@@ -892,6 +912,38 @@ onMounted(async () => {
         }
     }
 });
+
+async function saveWindowState() {
+    console.log('[POPUP] saveWindowState called for project:', projectId.value);
+    try {
+        const win = getCurrentWindow();
+        const size = await win.innerSize();
+        const position = await win.outerPosition();
+        console.log('[POPUP] Window size:', size.width, 'x', size.height);
+        console.log('[POPUP] Window position:', position.x, ',', position.y);
+
+        const saved = localStorage.getItem('terminal_projects_v4');
+        if (saved) {
+            const projects = JSON.parse(saved);
+            const projectIndex = projects.findIndex((p: any) => p.id === projectId.value);
+            console.log('[POPUP] Project index:', projectIndex);
+            if (projectIndex !== -1) {
+                projects[projectIndex].windowState = {
+                    width: size.width,
+                    height: size.height,
+                    x: position.x,
+                    y: position.y,
+                };
+                localStorage.setItem('terminal_projects_v4', JSON.stringify(projects));
+                console.log('[POPUP] Window state saved to localStorage');
+            }
+        } else {
+            console.log('[POPUP] No saved projects found');
+        }
+    } catch (e) {
+        console.error('[POPUP] Failed to save window state:', e);
+    }
+}
 
 onUnmounted(async () => {
     if (outputUnlisten) outputUnlisten();
