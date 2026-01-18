@@ -170,6 +170,16 @@ async function openProjectPopup(project: Project) {
             }
             project.isRunning = false;
         });
+
+        // Handle window close (Alt+F4, close button, etc.)
+        webview.once('tauri://destroyed', () => {
+            console.log('Terminal project popup window closed:', project.name);
+            for (const cmd of project.commands) {
+                cmd.popupLabel = null;
+                cmd.isRunning = false;
+            }
+            project.isRunning = false;
+        });
     } catch (error) {
         console.error('Failed to open terminal project popup:', error);
     }
