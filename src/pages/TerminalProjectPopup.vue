@@ -22,25 +22,31 @@ interface Command {
     fitAddon: FitAddon | null;
 }
 
-interface TerminalRow {
+// Nested layout structure
+interface LayoutNode {
     id: string;
-    commands: Command[];
+    type: 'terminal' | 'container';
+    command?: Command;
+    direction?: 'horizontal' | 'vertical';
+    children?: LayoutNode[];
 }
 
 const route = useRoute();
 const projectId = ref<number>(parseInt(route.query.projectId as string) || 0);
 const projectName = ref<string>((route.query.name as string) || 'Terminal');
 
-const rows = ref<TerminalRow[]>([]);
+const layout = ref<LayoutNode | null>(null);
 let outputUnlisten: UnlistenFn | null = null;
 let resizeObservers: Map<string, ResizeObserver> = new Map();
-
-// Map sessionId -> Command for fast lookup
 const sessionToCmd: Map<string, Command> = new Map();
 
 // Drag state
-const draggedTerminal = ref<{ rowId: string; cmdId: number } | null>(null);
-const dropTarget = ref<{ rowId: string; cmdId: number; position: 'left' | 'right' | 'top' | 'bottom' } | null>(null);
+const draggedNodeId = ref<string | null>(null);
+const dropTarget = ref<{
+    type: 'terminal' | 'edge';
+    nodeId?: string;
+    position: 'left' | 'right' | 'top' | 'bottom';
+} | null>(null);
 
 async function updateWindowTitle() {
     try {
@@ -52,17 +58,13 @@ async function updateWindowTitle() {
 }
 
 function loadProjectCommands(): Command[] {
-    console.log('Loading project commands for projectId:', projectId.value);
     const saved = localStorage.getItem('terminal_projects_v4');
-    console.log('localStorage data:', saved);
     if (saved) {
         try {
             const projects = JSON.parse(saved);
-            console.log('Parsed projects:', projects);
             const project = projects.find((p: any) => p.id === projectId.value);
-            console.log('Found project:', project);
             if (project) {
-                const commands = project.commands.map((c: any) => ({
+                return project.commands.map((c: any) => ({
                     id: c.id,
                     command: c.command,
                     workingDirectory: c.workingDirectory,
@@ -70,15 +72,123 @@ function loadProjectCommands(): Command[] {
                     terminal: null,
                     fitAddon: null,
                 }));
-                console.log('Commands to create:', commands.length);
-                return commands;
             }
         } catch (e) {
             console.error('Failed to load project:', e);
         }
     }
-    console.log('No commands found, returning empty array');
     return [];
+}
+
+function createInitialLayout(commands: Command[]): LayoutNode | null {
+    if (commands.length === 0) return null;
+    if (commands.length === 1) {
+        return {
+            id: `node-${commands[0].id}`,
+            type: 'terminal',
+            command: commands[0],
+        };
+    }
+    // Multiple commands - create horizontal container
+    return {
+        id: `container-${Date.now()}`,
+        type: 'container',
+        direction: 'horizontal',
+        children: commands.map(cmd => ({
+            id: `node-${cmd.id}`,
+            type: 'terminal',
+            command: cmd,
+        })),
+    };
+}
+
+function findNodeById(node: LayoutNode | null, id: string): LayoutNode | null {
+    if (!node) return null;
+    if (node.id === id) return node;
+    if (node.children) {
+        for (const child of node.children) {
+            const found = findNodeById(child, id);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
+function findParentNode(root: LayoutNode | null, nodeId: string): { parent: LayoutNode; index: number } | null {
+    if (!root || root.type !== 'container' || !root.children) return null;
+
+    for (let i = 0; i < root.children.length; i++) {
+        if (root.children[i].id === nodeId) {
+            return { parent: root, index: i };
+        }
+        const found = findParentNode(root.children[i], nodeId);
+        if (found) return found;
+    }
+    return null;
+}
+
+function removeNode(root: LayoutNode, nodeId: string): LayoutNode | null {
+    if (root.id === nodeId) return null;
+
+    if (root.type === 'container' && root.children) {
+        root.children = root.children.filter(child => {
+            if (child.id === nodeId) return false;
+            if (child.type === 'container') {
+                const result = removeNode(child, nodeId);
+                if (!result) return false;
+                Object.assign(child, result);
+            }
+            return true;
+        });
+
+        // Simplify: if only one child left, replace container with child
+        if (root.children.length === 1) {
+            return root.children[0];
+        }
+        if (root.children.length === 0) {
+            return null;
+        }
+    }
+    return root;
+}
+
+function getAllTerminalNodes(node: LayoutNode | null): LayoutNode[] {
+    if (!node) return [];
+    if (node.type === 'terminal') return [node];
+    if (node.children) {
+        return node.children.flatMap(child => getAllTerminalNodes(child));
+    }
+    return [];
+}
+
+// Save command references before layout modification
+function saveCommandRefs(node: LayoutNode | null): Map<number, Command> {
+    const refs = new Map<number, Command>();
+    const terminals = getAllTerminalNodes(node);
+    for (const t of terminals) {
+        if (t.command) {
+            refs.set(t.command.id, t.command);
+        }
+    }
+    return refs;
+}
+
+// Restore command references after layout modification
+function restoreCommandRefs(node: LayoutNode | null, refs: Map<number, Command>) {
+    if (!node) return;
+    if (node.type === 'terminal' && node.command) {
+        const saved = refs.get(node.command.id);
+        if (saved) {
+            node.command.terminal = saved.terminal;
+            node.command.fitAddon = saved.fitAddon;
+            node.command.sessionId = saved.sessionId;
+        }
+    }
+    if (node.children) {
+        for (const child of node.children) {
+            restoreCommandRefs(child, refs);
+        }
+    }
 }
 
 async function initTerminal(cmd: Command) {
@@ -107,21 +217,16 @@ async function initTerminal(cmd: Command) {
     cmd.terminal = terminal;
     cmd.fitAddon = fitAddon;
 
-    // Handle input
     terminal.onData(async (data) => {
         if (cmd.sessionId) {
             try {
-                await invoke('write_to_pty', {
-                    sessionId: cmd.sessionId,
-                    data,
-                });
+                await invoke('write_to_pty', { sessionId: cmd.sessionId, data });
             } catch (error) {
                 console.error('Failed to write to PTY:', error);
             }
         }
     });
 
-    // Setup resize observer
     const observer = new ResizeObserver(() => {
         if (cmd.fitAddon && cmd.sessionId) {
             cmd.fitAddon.fit();
@@ -135,7 +240,6 @@ async function initTerminal(cmd: Command) {
     observer.observe(container);
     resizeObservers.set(containerId, observer);
 
-    // Create PTY session
     try {
         const sessionId = await invoke<string>('create_pty_session', {
             rows: terminal.rows,
@@ -144,15 +248,9 @@ async function initTerminal(cmd: Command) {
         });
         cmd.sessionId = sessionId;
         sessionToCmd.set(sessionId, cmd);
-        console.log('PTY session created for cmd:', cmd.id, 'sessionId:', sessionId);
 
-        // Execute the command
         if (cmd.command) {
-            console.log('Executing command:', cmd.command);
-            await invoke('write_to_pty', {
-                sessionId,
-                data: cmd.command + '\n',
-            });
+            await invoke('write_to_pty', { sessionId, data: cmd.command + '\n' });
         }
     } catch (error) {
         console.error('Failed to create PTY session:', error);
@@ -160,27 +258,55 @@ async function initTerminal(cmd: Command) {
     }
 }
 
-// Drag & Drop handlers
-function startTerminalDrag(event: MouseEvent, row: TerminalRow, cmd: Command) {
+// Drag & Drop
+function startDrag(event: MouseEvent, node: LayoutNode) {
+    if (node.type !== 'terminal') return;
     event.preventDefault();
-    draggedTerminal.value = { rowId: row.id, cmdId: cmd.id };
+    draggedNodeId.value = node.id;
     document.body.classList.add('terminal-dragging');
-
-    document.addEventListener('mousemove', onTerminalDrag);
-    document.addEventListener('mouseup', endTerminalDrag);
+    document.addEventListener('mousemove', onDrag);
+    document.addEventListener('mouseup', endDrag);
 }
 
-function onTerminalDrag(event: MouseEvent) {
-    if (!draggedTerminal.value) return;
+function onDrag(event: MouseEvent) {
+    if (!draggedNodeId.value) return;
 
-    const elementsUnder = document.elementsFromPoint(event.clientX, event.clientY);
-    const terminalEl = elementsUnder.find(el => el.classList.contains('terminal-window')) as HTMLElement | undefined;
+    const container = document.querySelector('.layout-root') as HTMLElement;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const edgeThreshold = 50;
+
+    // Check container edges first
+    const nearLeft = event.clientX - containerRect.left < edgeThreshold;
+    const nearRight = containerRect.right - event.clientX < edgeThreshold;
+    const nearTop = event.clientY - containerRect.top < edgeThreshold;
+    const nearBottom = containerRect.bottom - event.clientY < edgeThreshold;
+
+    if (nearLeft) {
+        dropTarget.value = { type: 'edge', position: 'left' };
+        return;
+    }
+    if (nearRight) {
+        dropTarget.value = { type: 'edge', position: 'right' };
+        return;
+    }
+    if (nearTop) {
+        dropTarget.value = { type: 'edge', position: 'top' };
+        return;
+    }
+    if (nearBottom) {
+        dropTarget.value = { type: 'edge', position: 'bottom' };
+        return;
+    }
+
+    // Check terminals
+    const elements = document.elementsFromPoint(event.clientX, event.clientY);
+    const terminalEl = elements.find(el => el.classList.contains('terminal-window')) as HTMLElement | undefined;
 
     if (terminalEl) {
-        const cmdId = parseInt(terminalEl.dataset.cmdId || '0');
-        const rowId = terminalEl.dataset.rowId || '';
-
-        if (cmdId === draggedTerminal.value.cmdId) {
+        const nodeId = terminalEl.dataset.nodeId || '';
+        if (nodeId === draggedNodeId.value) {
             dropTarget.value = null;
             return;
         }
@@ -190,87 +316,138 @@ function onTerminalDrag(event: MouseEvent) {
         const relY = (event.clientY - rect.top) / rect.height;
 
         let position: 'left' | 'right' | 'top' | 'bottom';
-        if (relY < 0.25) {
-            position = 'top';
-        } else if (relY > 0.75) {
-            position = 'bottom';
-        } else if (relX < 0.5) {
-            position = 'left';
-        } else {
-            position = 'right';
-        }
+        if (relX < 0.25) position = 'left';
+        else if (relX > 0.75) position = 'right';
+        else if (relY < 0.5) position = 'top';
+        else position = 'bottom';
 
-        dropTarget.value = { rowId, cmdId, position };
+        dropTarget.value = { type: 'terminal', nodeId, position };
     } else {
         dropTarget.value = null;
     }
 }
 
-function endTerminalDrag() {
-    if (draggedTerminal.value && dropTarget.value) {
-        performDrop();
+function endDrag() {
+    console.log('endDrag called', { draggedNodeId: draggedNodeId.value, dropTarget: dropTarget.value });
+    if (draggedNodeId.value && dropTarget.value) {
+        try {
+            performDrop();
+        } catch (e) {
+            console.error('performDrop error:', e);
+        }
     }
-
-    draggedTerminal.value = null;
+    draggedNodeId.value = null;
     dropTarget.value = null;
     document.body.classList.remove('terminal-dragging');
-
-    document.removeEventListener('mousemove', onTerminalDrag);
-    document.removeEventListener('mouseup', endTerminalDrag);
+    document.removeEventListener('mousemove', onDrag);
+    document.removeEventListener('mouseup', endDrag);
 }
 
 function performDrop() {
-    if (!draggedTerminal.value || !dropTarget.value) return;
-
-    const sourceRowIndex = rows.value.findIndex(r => r.id === draggedTerminal.value!.rowId);
-    if (sourceRowIndex === -1) return;
-
-    const sourceRow = rows.value[sourceRowIndex];
-    const sourceCmdIndex = sourceRow.commands.findIndex(c => c.id === draggedTerminal.value!.cmdId);
-    if (sourceCmdIndex === -1) return;
-
-    const [movedCmd] = sourceRow.commands.splice(sourceCmdIndex, 1);
-
-    const targetRowIndex = rows.value.findIndex(r => r.id === dropTarget.value!.rowId);
-    if (targetRowIndex === -1) return;
-
-    const targetRow = rows.value[targetRowIndex];
-    const targetCmdIndex = targetRow.commands.findIndex(c => c.id === dropTarget.value!.cmdId);
-
-    const position = dropTarget.value.position;
-
-    if (position === 'left' || position === 'right') {
-        const insertIndex = position === 'left' ? targetCmdIndex : targetCmdIndex + 1;
-        targetRow.commands.splice(insertIndex, 0, movedCmd);
-    } else {
-        const newRow: TerminalRow = {
-            id: `row-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            commands: [movedCmd],
-        };
-        const insertRowIndex = position === 'top' ? targetRowIndex : targetRowIndex + 1;
-        rows.value.splice(insertRowIndex, 0, newRow);
+    console.log('performDrop called');
+    if (!draggedNodeId.value || !dropTarget.value || !layout.value) {
+        console.log('performDrop early return', { draggedNodeId: draggedNodeId.value, dropTarget: dropTarget.value, layout: layout.value });
+        return;
     }
 
-    // Remove empty source row
-    if (sourceRow.commands.length === 0) {
-        const idx = rows.value.findIndex(r => r.id === sourceRow.id);
-        if (idx !== -1) {
-            rows.value.splice(idx, 1);
+    // Save all command references before modification
+    const commandRefs = saveCommandRefs(layout.value);
+
+    const draggedNode = findNodeById(layout.value, draggedNodeId.value);
+    console.log('draggedNode:', draggedNode);
+    if (!draggedNode || draggedNode.type !== 'terminal') {
+        console.log('draggedNode not found or not terminal');
+        return;
+    }
+
+    // Remove dragged node from layout
+    const layoutCopy = JSON.parse(JSON.stringify(layout.value, (key, value) => {
+        if (key === 'terminal' || key === 'fitAddon') return undefined;
+        return value;
+    }));
+    const newLayout = removeNode(layoutCopy, draggedNodeId.value);
+    console.log('newLayout after remove:', newLayout);
+
+    // Clone the dragged node for insertion
+    const movedNode: LayoutNode = {
+        id: draggedNode.id,
+        type: 'terminal',
+        command: draggedNode.command,
+    };
+
+    if (dropTarget.value.type === 'edge') {
+        // Drop on container edge
+        const position = dropTarget.value.position;
+        const direction = (position === 'left' || position === 'right') ? 'horizontal' : 'vertical';
+        const insertFirst = position === 'left' || position === 'top';
+
+        if (!newLayout) {
+            layout.value = movedNode;
+        } else if (newLayout.type === 'container' && newLayout.direction === direction) {
+            // Same direction - just add to children
+            if (insertFirst) {
+                newLayout.children!.unshift(movedNode);
+            } else {
+                newLayout.children!.push(movedNode);
+            }
+            layout.value = newLayout;
+        } else {
+            // Different direction or terminal - wrap in new container
+            layout.value = {
+                id: `container-${Date.now()}`,
+                type: 'container',
+                direction,
+                children: insertFirst ? [movedNode, newLayout] : [newLayout, movedNode],
+            };
         }
-    }
+    } else {
+        // Drop on terminal
+        const targetNode = findNodeById(newLayout, dropTarget.value.nodeId!);
+        if (!targetNode) return;
 
-    // Recreate terminal on new DOM element
-    nextTick(async () => {
-        await recreateTerminal(movedCmd);
+        const position = dropTarget.value.position;
+        const direction = (position === 'left' || position === 'right') ? 'horizontal' : 'vertical';
+        const insertFirst = position === 'left' || position === 'top';
 
-        // Re-fit all terminals
-        for (const row of rows.value) {
-            for (const cmd of row.commands) {
-                if (cmd.fitAddon && cmd.terminal && cmd.id !== movedCmd.id) {
-                    cmd.fitAddon.fit();
-                }
+        // Find parent of target
+        const parentInfo = findParentNode(newLayout!, dropTarget.value.nodeId!);
+
+        if (parentInfo && parentInfo.parent.direction === direction) {
+            // Same direction - insert next to target
+            const insertIndex = insertFirst ? parentInfo.index : parentInfo.index + 1;
+            parentInfo.parent.children!.splice(insertIndex, 0, movedNode);
+            layout.value = newLayout;
+        } else {
+            // Different direction - wrap target in new container
+            const newContainer: LayoutNode = {
+                id: `container-${Date.now()}`,
+                type: 'container',
+                direction,
+                children: insertFirst ? [movedNode, { ...targetNode }] : [{ ...targetNode }, movedNode],
+            };
+
+            if (parentInfo) {
+                parentInfo.parent.children![parentInfo.index] = newContainer;
+                layout.value = newLayout;
+            } else {
+                // Target is root
+                layout.value = newContainer;
             }
         }
+    }
+
+    // Restore command references for all terminals
+    restoreCommandRefs(layout.value, commandRefs);
+
+    nextTick(async () => {
+        // Recreate ALL terminals since layout structure changed
+        const allTerminals = getAllTerminalNodes(layout.value);
+        for (const node of allTerminals) {
+            if (node.command) {
+                await recreateTerminal(node.command);
+            }
+        }
+        refitAllTerminals();
     });
 }
 
@@ -279,34 +456,25 @@ async function recreateTerminal(cmd: Command) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    // Disconnect old ResizeObserver
     const oldObserver = resizeObservers.get(containerId);
     if (oldObserver) {
         oldObserver.disconnect();
         resizeObservers.delete(containerId);
     }
 
-    // Save terminal buffer content
     let savedContent: string[] = [];
     if (cmd.terminal) {
         const buffer = cmd.terminal.buffer.active;
         for (let i = 0; i < buffer.length; i++) {
             const line = buffer.getLine(i);
-            if (line) {
-                savedContent.push(line.translateToString(true));
-            }
+            if (line) savedContent.push(line.translateToString(true));
         }
         while (savedContent.length > 0 && savedContent[savedContent.length - 1].trim() === '') {
             savedContent.pop();
         }
-    }
-
-    // Dispose old terminal
-    if (cmd.terminal) {
         cmd.terminal.dispose();
     }
 
-    // Create new terminal instance
     const terminal = new Terminal({
         cursorBlink: true,
         fontSize: 13,
@@ -328,17 +496,13 @@ async function recreateTerminal(cmd: Command) {
     }
 
     setTimeout(() => fitAddon.fit(), 50);
-
     cmd.terminal = terminal;
     cmd.fitAddon = fitAddon;
 
     terminal.onData(async (data) => {
         if (cmd.sessionId) {
             try {
-                await invoke('write_to_pty', {
-                    sessionId: cmd.sessionId,
-                    data,
-                });
+                await invoke('write_to_pty', { sessionId: cmd.sessionId, data });
             } catch (error) {
                 console.error('Failed to write to PTY:', error);
             }
@@ -369,45 +533,99 @@ async function recreateTerminal(cmd: Command) {
     terminal.focus();
 }
 
-function getDropPosition(rowId: string, cmdId: number): string | null {
-    if (dropTarget.value?.rowId === rowId && dropTarget.value?.cmdId === cmdId) {
+function refitAllTerminals() {
+    const terminals = getAllTerminalNodes(layout.value);
+    for (const node of terminals) {
+        if (node.command?.fitAddon) {
+            node.command.fitAddon.fit();
+        }
+    }
+}
+
+function getTerminalDropPosition(nodeId: string): string | null {
+    if (dropTarget.value?.type === 'terminal' && dropTarget.value?.nodeId === nodeId) {
         return dropTarget.value.position;
     }
     return null;
 }
 
-function isDraggedTerminal(cmdId: number): boolean {
-    return draggedTerminal.value?.cmdId === cmdId;
+function isDragging(nodeId: string): boolean {
+    return draggedNodeId.value === nodeId;
 }
 
-// Add new terminal to the right
-async function addTerminalToRight(row: TerminalRow, afterCmd: Command) {
+function getEdgeDropPosition(): string | null {
+    if (dropTarget.value?.type === 'edge') {
+        return dropTarget.value.position;
+    }
+    return null;
+}
+
+async function addTerminal(afterNode: LayoutNode) {
+    if (!afterNode.command || !layout.value) return;
+
+    // Save command refs before modification
+    const commandRefs = saveCommandRefs(layout.value);
+    const existingCmd = afterNode.command;
+
     const newCmd: Command = {
         id: Date.now(),
         command: '',
-        workingDirectory: afterCmd.workingDirectory,
+        workingDirectory: afterNode.command.workingDirectory,
         sessionId: null,
         terminal: null,
         fitAddon: null,
     };
 
-    const cmdIndex = row.commands.findIndex(c => c.id === afterCmd.id);
-    row.commands.splice(cmdIndex + 1, 0, newCmd);
+    const newNode: LayoutNode = {
+        id: `node-${newCmd.id}`,
+        type: 'terminal',
+        command: newCmd,
+    };
+
+    let needRecreateExisting = false;
+
+    const parentInfo = findParentNode(layout.value, afterNode.id);
+    if (parentInfo && parentInfo.parent.direction === 'horizontal') {
+        // Parent is horizontal - insert directly (no DOM change for existing)
+        parentInfo.parent.children!.splice(parentInfo.index + 1, 0, newNode);
+    } else if (parentInfo) {
+        // Parent is vertical - wrap current terminal in horizontal container with new one
+        const newContainer: LayoutNode = {
+            id: `container-${Date.now()}`,
+            type: 'container',
+            direction: 'horizontal',
+            children: [{ ...afterNode }, newNode],
+        };
+        parentInfo.parent.children![parentInfo.index] = newContainer;
+        needRecreateExisting = true; // DOM element will be recreated
+    } else {
+        // afterNode is root - wrap in horizontal container
+        layout.value = {
+            id: `container-${Date.now()}`,
+            type: 'container',
+            direction: 'horizontal',
+            children: [afterNode, newNode],
+        };
+        needRecreateExisting = true; // DOM element will be recreated
+    }
+
+    // Restore command refs for existing terminals
+    restoreCommandRefs(layout.value, commandRefs);
 
     await nextTick();
-    await initTerminal(newCmd);
 
-    for (const cmd of row.commands) {
-        if (cmd.fitAddon) {
-            cmd.fitAddon.fit();
-        }
+    // Recreate existing terminal if its DOM element was recreated
+    if (needRecreateExisting) {
+        await recreateTerminal(existingCmd);
     }
+
+    await initTerminal(newCmd);
+    refitAllTerminals();
 }
 
 onMounted(async () => {
     await updateWindowTitle();
 
-    // Listen for PTY output FIRST (before creating terminals)
     outputUnlisten = await listen<PtyOutputEvent>('pty-output', (event) => {
         const cmd = sessionToCmd.get(event.payload.session_id);
         if (cmd && cmd.terminal) {
@@ -415,19 +633,15 @@ onMounted(async () => {
         }
     });
 
-    // Load commands and create initial rows
     const commands = loadProjectCommands();
-    rows.value = commands.map(cmd => ({
-        id: `row-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        commands: [cmd],
-    }));
+    layout.value = createInitialLayout(commands);
 
     await nextTick();
 
-    // Initialize all terminals
-    for (const row of rows.value) {
-        for (const cmd of row.commands) {
-            await initTerminal(cmd);
+    const terminals = getAllTerminalNodes(layout.value);
+    for (const node of terminals) {
+        if (node.command) {
+            await initTerminal(node.command);
         }
     }
 });
@@ -435,18 +649,18 @@ onMounted(async () => {
 onUnmounted(async () => {
     if (outputUnlisten) outputUnlisten();
 
-    // Kill all PTY sessions
-    for (const row of rows.value) {
-        for (const cmd of row.commands) {
-            if (cmd.sessionId) {
+    const terminals = getAllTerminalNodes(layout.value);
+    for (const node of terminals) {
+        if (node.command) {
+            if (node.command.sessionId) {
                 try {
-                    await invoke('kill_pty_session', { sessionId: cmd.sessionId });
+                    await invoke('kill_pty_session', { sessionId: node.command.sessionId });
                 } catch (error) {
                     console.error('Failed to kill PTY session:', error);
                 }
             }
-            if (cmd.terminal) {
-                cmd.terminal.dispose();
+            if (node.command.terminal) {
+                node.command.terminal.dispose();
             }
         }
     }
@@ -458,33 +672,116 @@ onUnmounted(async () => {
 
 <template>
     <div class="terminal-project-popup">
-        <div class="terminals-grid">
-            <div
-                v-for="row in rows"
-                :key="row.id"
-                class="terminal-row"
-            >
+        <div
+            class="layout-root"
+            :class="{
+                'edge-drop-left': getEdgeDropPosition() === 'left',
+                'edge-drop-right': getEdgeDropPosition() === 'right',
+                'edge-drop-top': getEdgeDropPosition() === 'top',
+                'edge-drop-bottom': getEdgeDropPosition() === 'bottom',
+            }"
+        >
+            <!-- Recursive layout rendering -->
+            <template v-if="layout">
+                <component
+                    :is="'div'"
+                    v-if="layout.type === 'container'"
+                    class="layout-container"
+                    :class="[`direction-${layout.direction}`]"
+                >
+                    <template v-for="child in layout.children" :key="child.id">
+                        <!-- Nested container -->
+                        <div
+                            v-if="child.type === 'container'"
+                            class="layout-container"
+                            :class="[`direction-${child.direction}`]"
+                        >
+                            <template v-for="grandchild in child.children" :key="grandchild.id">
+                                <div
+                                    v-if="grandchild.type === 'terminal' && grandchild.command"
+                                    class="terminal-window"
+                                    :class="{
+                                        'is-dragging': isDragging(grandchild.id),
+                                        'drop-left': getTerminalDropPosition(grandchild.id) === 'left',
+                                        'drop-right': getTerminalDropPosition(grandchild.id) === 'right',
+                                        'drop-top': getTerminalDropPosition(grandchild.id) === 'top',
+                                        'drop-bottom': getTerminalDropPosition(grandchild.id) === 'bottom',
+                                    }"
+                                    :data-node-id="grandchild.id"
+                                >
+                                    <div class="terminal-header">
+                                        <div class="terminal-drag-handle" @mousedown="(e) => startDrag(e, grandchild)">
+                                            <svg viewBox="0 0 24 24" class="icon">
+                                                <circle cx="5" cy="9" r="1.5" fill="currentColor"/>
+                                                <circle cx="12" cy="9" r="1.5" fill="currentColor"/>
+                                                <circle cx="19" cy="9" r="1.5" fill="currentColor"/>
+                                                <circle cx="5" cy="15" r="1.5" fill="currentColor"/>
+                                                <circle cx="12" cy="15" r="1.5" fill="currentColor"/>
+                                                <circle cx="19" cy="15" r="1.5" fill="currentColor"/>
+                                            </svg>
+                                        </div>
+                                        <span class="terminal-title">{{ grandchild.command.command || 'Terminal' }}</span>
+                                        <button @click="addTerminal(grandchild)" class="btn-add" title="Add terminal">+</button>
+                                    </div>
+                                    <div :id="`terminal-${grandchild.command.id}`" class="terminal-content"></div>
+                                    <div class="drop-indicator drop-indicator-left"></div>
+                                    <div class="drop-indicator drop-indicator-right"></div>
+                                    <div class="drop-indicator drop-indicator-top"></div>
+                                    <div class="drop-indicator drop-indicator-bottom"></div>
+                                </div>
+                                <!-- Deeper nesting would go here if needed -->
+                            </template>
+                        </div>
+                        <!-- Direct terminal child -->
+                        <div
+                            v-else-if="child.type === 'terminal' && child.command"
+                            class="terminal-window"
+                            :class="{
+                                'is-dragging': isDragging(child.id),
+                                'drop-left': getTerminalDropPosition(child.id) === 'left',
+                                'drop-right': getTerminalDropPosition(child.id) === 'right',
+                                'drop-top': getTerminalDropPosition(child.id) === 'top',
+                                'drop-bottom': getTerminalDropPosition(child.id) === 'bottom',
+                            }"
+                            :data-node-id="child.id"
+                        >
+                            <div class="terminal-header">
+                                <div class="terminal-drag-handle" @mousedown="(e) => startDrag(e, child)">
+                                    <svg viewBox="0 0 24 24" class="icon">
+                                        <circle cx="5" cy="9" r="1.5" fill="currentColor"/>
+                                        <circle cx="12" cy="9" r="1.5" fill="currentColor"/>
+                                        <circle cx="19" cy="9" r="1.5" fill="currentColor"/>
+                                        <circle cx="5" cy="15" r="1.5" fill="currentColor"/>
+                                        <circle cx="12" cy="15" r="1.5" fill="currentColor"/>
+                                        <circle cx="19" cy="15" r="1.5" fill="currentColor"/>
+                                    </svg>
+                                </div>
+                                <span class="terminal-title">{{ child.command.command || 'Terminal' }}</span>
+                                <button @click="addTerminal(child)" class="btn-add" title="Add terminal">+</button>
+                            </div>
+                            <div :id="`terminal-${child.command.id}`" class="terminal-content"></div>
+                            <div class="drop-indicator drop-indicator-left"></div>
+                            <div class="drop-indicator drop-indicator-right"></div>
+                            <div class="drop-indicator drop-indicator-top"></div>
+                            <div class="drop-indicator drop-indicator-bottom"></div>
+                        </div>
+                    </template>
+                </component>
+                <!-- Single terminal (no container) -->
                 <div
-                    v-for="cmd in row.commands"
-                    :key="cmd.id"
-                    class="terminal-window"
+                    v-else-if="layout.type === 'terminal' && layout.command"
+                    class="terminal-window single"
                     :class="{
-                        'is-dragging': isDraggedTerminal(cmd.id),
-                        'drop-left': getDropPosition(row.id, cmd.id) === 'left',
-                        'drop-right': getDropPosition(row.id, cmd.id) === 'right',
-                        'drop-top': getDropPosition(row.id, cmd.id) === 'top',
-                        'drop-bottom': getDropPosition(row.id, cmd.id) === 'bottom',
+                        'is-dragging': isDragging(layout.id),
+                        'drop-left': getTerminalDropPosition(layout.id) === 'left',
+                        'drop-right': getTerminalDropPosition(layout.id) === 'right',
+                        'drop-top': getTerminalDropPosition(layout.id) === 'top',
+                        'drop-bottom': getTerminalDropPosition(layout.id) === 'bottom',
                     }"
-                    :style="{ flex: `1 1 ${100 / row.commands.length}%` }"
-                    :data-cmd-id="cmd.id"
-                    :data-row-id="row.id"
+                    :data-node-id="layout.id"
                 >
                     <div class="terminal-header">
-                        <div
-                            class="terminal-drag-handle"
-                            title="Drag to rearrange"
-                            @mousedown="(e) => startTerminalDrag(e, row, cmd)"
-                        >
+                        <div class="terminal-drag-handle" @mousedown="(e) => startDrag(e, layout!)">
                             <svg viewBox="0 0 24 24" class="icon">
                                 <circle cx="5" cy="9" r="1.5" fill="currentColor"/>
                                 <circle cx="12" cy="9" r="1.5" fill="currentColor"/>
@@ -494,28 +791,21 @@ onUnmounted(async () => {
                                 <circle cx="19" cy="15" r="1.5" fill="currentColor"/>
                             </svg>
                         </div>
-                        <span class="terminal-title">{{ cmd.command || 'Terminal' }}</span>
-                        <div class="terminal-actions">
-                            <button
-                                @click="addTerminalToRight(row, cmd)"
-                                class="btn-add-terminal"
-                                title="Add terminal to the right"
-                            >
-                                <svg viewBox="0 0 24 24" class="icon">
-                                    <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                    <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                </svg>
-                            </button>
-                        </div>
+                        <span class="terminal-title">{{ layout.command.command || 'Terminal' }}</span>
+                        <button @click="addTerminal(layout!)" class="btn-add" title="Add terminal">+</button>
                     </div>
-                    <div :id="`terminal-${cmd.id}`" class="terminal-content"></div>
-                    <!-- Drop zone indicators -->
+                    <div :id="`terminal-${layout.command.id}`" class="terminal-content"></div>
                     <div class="drop-indicator drop-indicator-left"></div>
                     <div class="drop-indicator drop-indicator-right"></div>
                     <div class="drop-indicator drop-indicator-top"></div>
                     <div class="drop-indicator drop-indicator-bottom"></div>
                 </div>
-            </div>
+            </template>
+            <!-- Edge drop indicators -->
+            <div class="edge-indicator edge-indicator-left"></div>
+            <div class="edge-indicator edge-indicator-right"></div>
+            <div class="edge-indicator edge-indicator-top"></div>
+            <div class="edge-indicator edge-indicator-bottom"></div>
         </div>
     </div>
 </template>
@@ -527,19 +817,31 @@ onUnmounted(async () => {
     background #2d2d30
     overflow hidden
 
-.terminals-grid
+.layout-root
     width 100%
     height 100%
-    display flex
-    flex-direction column
-    gap 4px
     padding 4px
+    position relative
+    display flex
 
-.terminal-row
+    &.edge-drop-left .edge-indicator-left,
+    &.edge-drop-right .edge-indicator-right,
+    &.edge-drop-top .edge-indicator-top,
+    &.edge-drop-bottom .edge-indicator-bottom
+        opacity 1
+
+.layout-container
     display flex
     gap 4px
     flex 1
+    min-width 0
     min-height 0
+
+    &.direction-horizontal
+        flex-direction row
+
+    &.direction-vertical
+        flex-direction column
 
 .terminal-window
     display flex
@@ -547,9 +849,14 @@ onUnmounted(async () => {
     background #1e1e1e
     border-radius 4px
     overflow hidden
-    min-width 200px
+    flex 1
+    min-width 150px
+    min-height 100px
     position relative
-    transition all 0.15s ease
+
+    &.single
+        width 100%
+        height 100%
 
     &.is-dragging
         opacity 0.5
@@ -563,7 +870,7 @@ onUnmounted(async () => {
 .drop-indicator
     position absolute
     opacity 0
-    transition opacity 0.2s ease
+    transition opacity 0.15s ease
     pointer-events none
     z-index 10
 
@@ -571,29 +878,61 @@ onUnmounted(async () => {
     left 0
     top 0
     bottom 0
-    width 40px
-    background linear-gradient(to right, rgba(0, 120, 212, 0.7), rgba(0, 120, 212, 0))
+    width 30px
+    background linear-gradient(to right, rgba(0, 120, 212, 0.7), transparent)
 
 .drop-indicator-right
     right 0
     top 0
     bottom 0
-    width 40px
-    background linear-gradient(to left, rgba(0, 120, 212, 0.7), rgba(0, 120, 212, 0))
+    width 30px
+    background linear-gradient(to left, rgba(0, 120, 212, 0.7), transparent)
 
 .drop-indicator-top
     top 0
     left 0
     right 0
-    height 40px
-    background linear-gradient(to bottom, rgba(0, 120, 212, 0.7), rgba(0, 120, 212, 0))
+    height 30px
+    background linear-gradient(to bottom, rgba(0, 120, 212, 0.7), transparent)
 
 .drop-indicator-bottom
     bottom 0
     left 0
     right 0
-    height 40px
-    background linear-gradient(to top, rgba(0, 120, 212, 0.7), rgba(0, 120, 212, 0))
+    height 30px
+    background linear-gradient(to top, rgba(0, 120, 212, 0.7), transparent)
+
+.edge-indicator
+    position absolute
+    opacity 0
+    transition opacity 0.15s ease
+    pointer-events none
+    z-index 20
+    background rgba(76, 175, 80, 0.6)
+
+.edge-indicator-left
+    left 0
+    top 0
+    bottom 0
+    width 50px
+
+.edge-indicator-right
+    right 0
+    top 0
+    bottom 0
+    width 50px
+
+.edge-indicator-top
+    top 0
+    left 0
+    right 0
+    height 50px
+
+.edge-indicator-bottom
+    bottom 0
+    left 0
+    right 0
+    height 50px
 
 .terminal-header
     display flex
@@ -605,15 +944,12 @@ onUnmounted(async () => {
     flex-shrink 0
 
 .terminal-drag-handle
-    display flex
-    align-items center
-    justify-content center
     cursor grab
     color #666
-    padding 4px
-    margin -4px
-    border-radius 4px
-    transition all 0.15s ease
+    padding 2px
+    border-radius 3px
+    display flex
+    align-items center
     user-select none
 
     &:hover
@@ -622,7 +958,6 @@ onUnmounted(async () => {
 
     &:active
         cursor grabbing
-        color #fff
 
     .icon
         width 16px
@@ -632,37 +967,24 @@ onUnmounted(async () => {
 .terminal-title
     font-size 12px
     color #ccc
-    font-family 'JetBrains Mono', 'Consolas', monospace
-    white-space nowrap
+    font-family 'JetBrains Mono', monospace
+    flex 1
     overflow hidden
     text-overflow ellipsis
-    flex 1
+    white-space nowrap
 
-.terminal-actions
-    display flex
-    gap 4px
-
-.btn-add-terminal
-    display flex
-    align-items center
-    justify-content center
-    width 20px
-    height 20px
-    padding 0
+.btn-add
     background none
     border none
     color #888
     cursor pointer
+    font-size 16px
+    padding 0 4px
     border-radius 3px
-    transition all 0.15s ease
 
     &:hover
         background rgba(255, 255, 255, 0.1)
         color #4caf50
-
-    .icon
-        width 14px
-        height 14px
 
 .terminal-content
     flex 1
@@ -683,9 +1005,6 @@ onUnmounted(async () => {
 
 <style lang="stylus">
 body.terminal-dragging
-    .terminal-content
-        pointer-events none !important
-
-    .xterm
+    .terminal-content, .xterm
         pointer-events none !important
 </style>
