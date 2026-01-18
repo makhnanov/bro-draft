@@ -289,14 +289,14 @@ async function stopProject(projectId: number) {
     project.isRunning = false;
 }
 
-// Open command in popup window
-async function openInPopup(project: Project, cmd: Command) {
+// Open new terminal popup window
+async function openNewTerminalPopup(project: Project) {
     try {
         const popupId = `terminal-popup-${Date.now()}`;
-        const title = `${project.name} - ${cmd.command || 'Terminal'}`;
+        const title = `${project.name} - Terminal`;
 
         new WebviewWindow(popupId, {
-            url: `index.html#/terminal-popup?workingDir=${encodeURIComponent(cmd.workingDirectory || '')}&title=${encodeURIComponent(title)}&command=${encodeURIComponent(cmd.command || '')}`,
+            url: `index.html#/terminal-popup?title=${encodeURIComponent(title)}`,
             title: title,
             width: 900,
             height: 600,
@@ -305,6 +305,43 @@ async function openInPopup(project: Project, cmd: Command) {
         });
     } catch (error) {
         console.error('Failed to open popup:', error);
+    }
+}
+
+// Add new terminal to the right of an existing one in the same row
+async function addTerminalToRight(project: Project, row: TerminalRow, afterCmd: Command) {
+    // Create new command
+    const newCmd: Command = {
+        id: Date.now(),
+        command: '',
+        workingDirectory: afterCmd.workingDirectory, // Inherit working directory
+        sessionId: null,
+        terminal: null,
+        fitAddon: null,
+        isRunning: true,
+    };
+
+    // Find position and insert after the current command
+    const cmdIndex = row.commands.findIndex(c => c.id === afterCmd.id);
+    row.commands.splice(cmdIndex + 1, 0, newCmd);
+
+    // Also add to project commands list for persistence
+    project.commands.push({
+        ...newCmd,
+        isRunning: false,
+    });
+    saveProjects();
+
+    await nextTick();
+
+    // Initialize the new terminal
+    await initTerminal(project, newCmd);
+
+    // Re-fit all terminals in the row
+    for (const cmd of row.commands) {
+        if (cmd.fitAddon) {
+            cmd.fitAddon.fit();
+        }
     }
 }
 
@@ -461,7 +498,23 @@ async function recreateTerminal(project: Project, cmd: Command) {
         resizeObservers.delete(containerId);
     }
 
-    // Dispose old terminal if exists
+    // Save terminal buffer content before disposing
+    let savedContent: string[] = [];
+    if (cmd.terminal) {
+        const buffer = cmd.terminal.buffer.active;
+        for (let i = 0; i < buffer.length; i++) {
+            const line = buffer.getLine(i);
+            if (line) {
+                savedContent.push(line.translateToString(true));
+            }
+        }
+        // Remove trailing empty lines
+        while (savedContent.length > 0 && savedContent[savedContent.length - 1].trim() === '') {
+            savedContent.pop();
+        }
+    }
+
+    // Dispose old terminal
     if (cmd.terminal) {
         cmd.terminal.dispose();
     }
@@ -482,6 +535,11 @@ async function recreateTerminal(project: Project, cmd: Command) {
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
+
+    // Restore saved content
+    if (savedContent.length > 0) {
+        terminal.write(savedContent.join('\r\n') + '\r\n');
+    }
 
     setTimeout(() => fitAddon.fit(), 50);
 
@@ -602,7 +660,6 @@ onUnmounted(() => {
                             @input="updateProjectName(project.id, ($event.target as HTMLInputElement).value)"
                             class="project-name-input"
                             placeholder="Project name"
-                            :disabled="project.isRunning"
                         />
                     </div>
                     <div class="project-actions">
@@ -615,6 +672,18 @@ onUnmounted(() => {
                             <svg viewBox="0 0 24 24" class="icon">
                                 <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                                 <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                        <button
+                            v-if="project.isRunning"
+                            @click="openNewTerminalPopup(project)"
+                            class="btn-popout-header"
+                            title="Open terminal in new window"
+                        >
+                            <svg viewBox="0 0 24 24" class="icon">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                                <polyline points="15 3 21 3 21 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                                <line x1="10" y1="14" x2="21" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </button>
                         <button
@@ -737,11 +806,14 @@ onUnmounted(() => {
                                 </div>
                                 <span class="terminal-title">{{ cmd.command || 'Terminal' }}</span>
                                 <div class="terminal-actions">
-                                    <button @click="openInPopup(project, cmd)" class="btn-popout" title="Open in new window">
+                                    <button
+                                        @click="addTerminalToRight(project, row, cmd)"
+                                        class="btn-add-terminal"
+                                        title="Add terminal to the right"
+                                    >
                                         <svg viewBox="0 0 24 24" class="icon">
-                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                                            <polyline points="15 3 21 3 21 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                                            <line x1="10" y1="14" x2="21" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                            <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                                         </svg>
                                     </button>
                                 </div>
@@ -1139,7 +1211,7 @@ onUnmounted(() => {
     display flex
     gap 4px
 
-.btn-popout
+.btn-add-terminal
     display flex
     align-items center
     justify-content center
@@ -1155,11 +1227,31 @@ onUnmounted(() => {
 
     &:hover
         background rgba(255, 255, 255, 0.1)
-        color #fff
+        color #4caf50
 
     .icon
         width 14px
         height 14px
+
+.btn-popout-header
+    width 36px
+    height 36px
+    display flex
+    align-items center
+    justify-content center
+    background-color #6c757d
+    color white
+    border none
+    border-radius 6px
+    cursor pointer
+    transition all 0.2s ease
+
+    &:hover
+        background-color #5a6268
+
+    .icon
+        width 18px
+        height 18px
 
 
 .terminal-content
