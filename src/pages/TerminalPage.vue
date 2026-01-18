@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import { WebviewWindow, getAllWebviewWindows } from '@tauri-apps/api/webviewWindow';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import draggable from 'vuedraggable';
 
 interface Command {
@@ -11,14 +12,24 @@ interface Command {
     popupLabel: string | null; // Label of the popup window when running
 }
 
+interface SavedLayout {
+    id: string;
+    type: 'terminal' | 'container';
+    commandId?: number;
+    direction?: 'horizontal' | 'vertical';
+    children?: SavedLayout[];
+}
+
 interface Project {
     id: number;
     name: string;
     commands: Command[];
     isRunning: boolean;
+    layout?: SavedLayout | null;
 }
 
 const projects = ref<Project[]>([]);
+let projectsUpdateUnlisten: UnlistenFn | null = null;
 
 // Dragging state for setup mode
 const isDragging = ref(false);
@@ -32,6 +43,7 @@ function loadProjects() {
             projects.value = parsed.map((p: any) => ({
                 ...p,
                 isRunning: false,
+                layout: p.layout || null,
                 commands: p.commands.map((c: any) => ({
                     ...c,
                     isRunning: false,
@@ -53,8 +65,39 @@ function saveProjects() {
             command: c.command,
             workingDirectory: c.workingDirectory,
         })),
+        layout: p.layout || null,
     }));
     localStorage.setItem('terminal_projects_v4', JSON.stringify(toSave));
+}
+
+// Sync with popup window changes
+function onStorageChange(event: StorageEvent) {
+    if (event.key === 'terminal_projects_v4' && event.newValue) {
+        try {
+            const parsed = JSON.parse(event.newValue);
+            // Update commands and layout for each project (preserve isRunning state)
+            for (const savedProject of parsed) {
+                const project = projects.value.find(p => p.id === savedProject.id);
+                if (project) {
+                    // Update commands list
+                    const newCommands = savedProject.commands.map((c: any) => {
+                        const existing = project.commands.find(ec => ec.id === c.id);
+                        return {
+                            id: c.id,
+                            command: c.command,
+                            workingDirectory: c.workingDirectory,
+                            isRunning: existing?.isRunning || false,
+                            popupLabel: existing?.popupLabel || null,
+                        };
+                    });
+                    project.commands = newCommands;
+                    project.layout = savedProject.layout || null;
+                }
+            }
+        } catch (e) {
+            console.error('Failed to sync projects:', e);
+        }
+    }
 }
 
 // Project management
@@ -98,6 +141,8 @@ function addCommand(projectId: number) {
             popupLabel: null,
         };
         project.commands.push(newCommand);
+        // Reset layout when commands change from main window
+        project.layout = null;
         saveProjects();
     }
 }
@@ -106,6 +151,8 @@ function deleteCommand(projectId: number, commandId: number) {
     const project = projects.value.find(p => p.id === projectId);
     if (project) {
         project.commands = project.commands.filter(c => c.id !== commandId);
+        // Reset layout when commands change from main window
+        project.layout = null;
         saveProjects();
     }
 }
@@ -151,6 +198,7 @@ async function openProjectPopup(project: Project) {
             resizable: true,
             center: true,
             decorations: false,
+            backgroundColor: '#2d2d30',
         });
 
         // Store popup label on project level
@@ -220,11 +268,43 @@ function onDragEnd() {
     saveProjects();
 }
 
-onMounted(() => {
+onMounted(async () => {
     loadProjects();
+    window.addEventListener('storage', onStorageChange);
+    // Listen for updates from popup windows
+    projectsUpdateUnlisten = await listen('terminal-projects-updated', () => {
+        // Reload projects from localStorage
+        const saved = localStorage.getItem('terminal_projects_v4');
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                for (const savedProject of parsed) {
+                    const project = projects.value.find(p => p.id === savedProject.id);
+                    if (project) {
+                        const newCommands = savedProject.commands.map((c: any) => {
+                            const existing = project.commands.find(ec => ec.id === c.id);
+                            return {
+                                id: c.id,
+                                command: c.command,
+                                workingDirectory: c.workingDirectory,
+                                isRunning: existing?.isRunning || false,
+                                popupLabel: existing?.popupLabel || null,
+                            };
+                        });
+                        project.commands = newCommands;
+                        project.layout = savedProject.layout || null;
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to sync projects:', e);
+            }
+        }
+    });
 });
 
 onUnmounted(async () => {
+    window.removeEventListener('storage', onStorageChange);
+    if (projectsUpdateUnlisten) projectsUpdateUnlisten();
     // Close all popup windows when leaving the page
     for (const project of projects.value) {
         if (project.isRunning) {

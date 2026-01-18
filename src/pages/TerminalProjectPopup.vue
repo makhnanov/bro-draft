@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, triggerRef, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SerializeAddon } from '@xterm/addon-serialize';
@@ -22,6 +22,9 @@ interface Command {
     terminal: Terminal | null;
     fitAddon: FitAddon | null;
     serializeAddon: SerializeAddon | null;
+    // For capturing first command in new terminals
+    inputBuffer: string;
+    commandCaptured: boolean;
 }
 
 // Nested layout structure
@@ -59,14 +62,22 @@ async function updateWindowTitle() {
     }
 }
 
-function loadProjectCommands(): Command[] {
+interface SavedLayout {
+    id: string;
+    type: 'terminal' | 'container';
+    commandId?: number;
+    direction?: 'horizontal' | 'vertical';
+    children?: SavedLayout[];
+}
+
+function loadProjectData(): { commands: Command[], savedLayout: SavedLayout | null } {
     const saved = localStorage.getItem('terminal_projects_v4');
     if (saved) {
         try {
             const projects = JSON.parse(saved);
             const project = projects.find((p: any) => p.id === projectId.value);
             if (project) {
-                return project.commands.map((c: any) => ({
+                const commands = project.commands.map((c: any) => ({
                     id: c.id,
                     command: c.command,
                     workingDirectory: c.workingDirectory,
@@ -74,17 +85,104 @@ function loadProjectCommands(): Command[] {
                     terminal: null,
                     fitAddon: null,
                     serializeAddon: null,
+                    inputBuffer: '',
+                    commandCaptured: !!c.command, // Already captured if command exists
                 }));
+                return { commands, savedLayout: project.layout || null };
             }
         } catch (e) {
             console.error('Failed to load project:', e);
         }
     }
-    return [];
+    return { commands: [], savedLayout: null };
 }
 
-function createInitialLayout(commands: Command[]): LayoutNode | null {
+function saveProjectData() {
+    const saved = localStorage.getItem('terminal_projects_v4');
+    if (!saved) return;
+
+    try {
+        const projects = JSON.parse(saved);
+        const projectIndex = projects.findIndex((p: any) => p.id === projectId.value);
+        if (projectIndex === -1) return;
+
+        // Extract commands from layout
+        const allTerminals = getAllTerminalNodes(layout.value);
+        const commands = allTerminals.map(node => ({
+            id: node.command!.id,
+            command: node.command!.command,
+            workingDirectory: node.command!.workingDirectory,
+        }));
+
+        // Serialize layout (without terminal instances)
+        const serializeLayout = (node: LayoutNode | null): SavedLayout | null => {
+            if (!node) return null;
+            if (node.type === 'terminal') {
+                return {
+                    id: node.id,
+                    type: 'terminal',
+                    commandId: node.command?.id,
+                };
+            }
+            return {
+                id: node.id,
+                type: 'container',
+                direction: node.direction,
+                children: node.children?.map(child => serializeLayout(child)!).filter(Boolean),
+            };
+        };
+
+        projects[projectIndex] = {
+            ...projects[projectIndex],
+            commands,
+            layout: serializeLayout(layout.value),
+        };
+
+        localStorage.setItem('terminal_projects_v4', JSON.stringify(projects));
+        // Notify main window about changes
+        emit('terminal-projects-updated', { projectId: projectId.value });
+    } catch (e) {
+        console.error('Failed to save project:', e);
+    }
+}
+
+function createLayoutFromSaved(savedLayout: SavedLayout, commandsMap: Map<number, Command>): LayoutNode | null {
+    if (savedLayout.type === 'terminal') {
+        const command = commandsMap.get(savedLayout.commandId!);
+        if (!command) return null;
+        return {
+            id: savedLayout.id,
+            type: 'terminal',
+            command,
+        };
+    }
+    // Container
+    const children = savedLayout.children
+        ?.map(child => createLayoutFromSaved(child, commandsMap))
+        .filter((node): node is LayoutNode => node !== null) || [];
+
+    if (children.length === 0) return null;
+    if (children.length === 1) return children[0];
+
+    return {
+        id: savedLayout.id,
+        type: 'container',
+        direction: savedLayout.direction,
+        children,
+    };
+}
+
+function createInitialLayout(commands: Command[], savedLayout: SavedLayout | null): LayoutNode | null {
     if (commands.length === 0) return null;
+
+    // Try to restore saved layout
+    if (savedLayout) {
+        const commandsMap = new Map(commands.map(cmd => [cmd.id, cmd]));
+        const restored = createLayoutFromSaved(savedLayout, commandsMap);
+        if (restored) return restored;
+    }
+
+    // Fallback: create default layout
     if (commands.length === 1) {
         return {
             id: `node-${commands[0].id}`,
@@ -186,6 +284,8 @@ function restoreCommandRefs(node: LayoutNode | null, refs: Map<number, Command>)
             node.command.fitAddon = saved.fitAddon;
             node.command.serializeAddon = saved.serializeAddon;
             node.command.sessionId = saved.sessionId;
+            node.command.inputBuffer = saved.inputBuffer;
+            node.command.commandCaptured = saved.commandCaptured;
         }
     }
     if (node.children) {
@@ -240,6 +340,26 @@ async function initTerminal(cmd: Command) {
             dataLength: data.length,
             sessionId: cmd.sessionId
         });
+
+        // Capture first command for new terminals
+        if (!cmd.commandCaptured) {
+            for (const char of data) {
+                const code = char.charCodeAt(0);
+                if (code === 13) { // Enter
+                    if (cmd.inputBuffer.trim()) {
+                        cmd.command = cmd.inputBuffer.trim();
+                        cmd.commandCaptured = true;
+                        triggerRef(layout); // Update UI
+                        saveProjectData();
+                    }
+                    cmd.inputBuffer = '';
+                } else if (code === 127 || code === 8) { // Backspace
+                    cmd.inputBuffer = cmd.inputBuffer.slice(0, -1);
+                } else if (code >= 32 || code > 127) { // Printable chars
+                    cmd.inputBuffer += char;
+                }
+            }
+        }
 
         if (cmd.sessionId) {
             const now = Date.now();
@@ -482,6 +602,7 @@ function performDrop() {
             }
         }
         refitAllTerminals();
+        saveProjectData();
     });
 }
 
@@ -581,6 +702,26 @@ async function recreateTerminal(cmd: Command) {
             sessionId: cmd.sessionId
         });
 
+        // Capture first command for new terminals
+        if (!cmd.commandCaptured) {
+            for (const char of data) {
+                const code = char.charCodeAt(0);
+                if (code === 13) { // Enter
+                    if (cmd.inputBuffer.trim()) {
+                        cmd.command = cmd.inputBuffer.trim();
+                        cmd.commandCaptured = true;
+                        triggerRef(layout); // Update UI
+                        saveProjectData();
+                    }
+                    cmd.inputBuffer = '';
+                } else if (code === 127 || code === 8) { // Backspace
+                    cmd.inputBuffer = cmd.inputBuffer.slice(0, -1);
+                } else if (code >= 32 || code > 127) { // Printable chars
+                    cmd.inputBuffer += char;
+                }
+            }
+        }
+
         if (cmd.sessionId) {
             const now = Date.now();
             const isNonAscii = data.charCodeAt(0) > 127;
@@ -677,6 +818,8 @@ async function addTerminal(afterNode: LayoutNode) {
         terminal: null,
         fitAddon: null,
         serializeAddon: null,
+        inputBuffer: '',
+        commandCaptured: false,
     };
 
     const newNode: LayoutNode = {
@@ -724,6 +867,7 @@ async function addTerminal(afterNode: LayoutNode) {
 
     await initTerminal(newCmd);
     refitAllTerminals();
+    saveProjectData();
 }
 
 onMounted(async () => {
@@ -736,8 +880,8 @@ onMounted(async () => {
         }
     });
 
-    const commands = loadProjectCommands();
-    layout.value = createInitialLayout(commands);
+    const { commands, savedLayout } = loadProjectData();
+    layout.value = createInitialLayout(commands, savedLayout);
 
     await nextTick();
 
