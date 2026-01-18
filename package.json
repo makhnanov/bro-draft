@@ -12,10 +12,14 @@
   "dependencies": {
     "@cloudflare/speedtest": "^1.7.0",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "vue": "^3.5.13",
-    "vue-router": "^4.6.3"
+    "vue-grid-layout": "3.0.0-beta1",
+    "vue-router": "^4.6.3",
+    "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

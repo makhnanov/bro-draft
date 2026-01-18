@@ -20,6 +20,7 @@ import NotificationsPage from '../pages/NotificationsPage.vue'
 import KeyboardPage from '../pages/KeyboardPage.vue'
 import StreamingPage from '../pages/StreamingPage.vue'
 import TerminalPage from '../pages/TerminalPage.vue'
+import TerminalPopup from '../pages/TerminalPopup.vue'
 import ButtonsPage from '../pages/ButtonsPage.vue'
 import OverlayButtonPage from '../pages/OverlayButtonPage.vue'
 
@@ -125,6 +126,11 @@ const routes = [
     component: TerminalPage
   },
   {
+    path: '/terminal-popup',
+    name: 'TerminalPopup',
+    component: TerminalPopup
+  },
+  {
     path: '/buttons',
     name: 'Buttons',
     component: ButtonsPage
@@ -164,8 +170,8 @@ router.isReady().then(async () => {
 
 // Сохраняем маршрут при каждом переходе (кроме начальной загрузки)
 router.afterEach((to) => {
-  // Не сохраняем маршрут при начальной загрузке, area-selector и screenshot-popup
-  if (!isInitialLoad && to.path !== '/area-selector' && to.path !== '/screenshot-popup') {
+  // Не сохраняем маршрут при начальной загрузке и для popup страниц
+  if (!isInitialLoad && to.path !== '/area-selector' && to.path !== '/screenshot-popup' && to.path !== '/terminal-popup') {
     invoke('save_last_route', { route: to.path }).catch(err => {
       console.error('Failed to save route:', err)
     })

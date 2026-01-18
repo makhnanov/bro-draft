@@ -1,4 +1,4 @@
-use tauri::{Manager, WindowSizeConstraints};
+use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use std::time::Duration;
 use sysinfo::Components;
@@ -6,8 +6,24 @@ use std::fs;
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use screenshots::Screen;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system, MasterPty, Child};
+use std::io::{Read, Write};
 
 mod websocket_stream;
+
+// PTY Session management
+struct PtySession {
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn Child + Send + Sync>,
+}
+
+static PTY_SESSIONS: Lazy<Mutex<HashMap<String, PtySession>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
 
 #[derive(Serialize, Deserialize)]
 struct AppState {
@@ -308,9 +324,6 @@ async fn capture_monitor_screenshot(monitor_index: usize) -> Result<String, Stri
     println!("Screenshot of monitor {} captured successfully", monitor_index);
     Ok(base64_image)
 }
-
-use std::sync::Mutex;
-use std::collections::HashMap;
 
 // Глобальное состояние для хранения скриншотов (по одному на монитор)
 struct ScreenshotState {
@@ -2020,6 +2033,173 @@ async fn find_image_on_screen(
     Ok(None)
 }
 
+// ==================== PTY Terminal Commands ====================
+
+#[derive(Serialize, Clone)]
+struct PtyOutputEvent {
+    session_id: String,
+    data: String,
+}
+
+#[derive(Serialize, Clone)]
+struct PtyExitEvent {
+    session_id: String,
+    exit_code: Option<u32>,
+}
+
+#[tauri::command]
+fn create_pty_session(
+    rows: u16,
+    cols: u16,
+    working_directory: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    use tauri::Emitter;
+
+    let session_id = format!("pty-{}", uuid::Uuid::new_v4().to_string());
+
+    let pty_system = native_pty_system();
+
+    let pair = pty_system.openpty(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    }).map_err(|e| format!("Failed to open PTY: {}", e))?;
+
+    // Build shell command
+    #[cfg(target_os = "windows")]
+    let mut cmd = CommandBuilder::new("cmd.exe");
+
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = CommandBuilder::new("bash");
+
+    // Set working directory
+    if let Some(ref dir) = working_directory {
+        cmd.cwd(dir);
+    }
+
+    // Spawn shell
+    let child = pair.slave.spawn_command(cmd)
+        .map_err(|e| format!("Failed to spawn shell: {}", e))?;
+
+    // Get master for reading/writing
+    let master = pair.master;
+
+    // Get writer for sending input
+    let writer = master.take_writer()
+        .map_err(|e| format!("Failed to get writer: {}", e))?;
+
+    // Clone for reader thread
+    let session_id_clone = session_id.clone();
+    let app_handle_clone = app_handle.clone();
+
+    // Create reader for output
+    let mut reader = master.try_clone_reader()
+        .map_err(|e| format!("Failed to clone reader: {}", e))?;
+
+    // Spawn thread to read PTY output
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 4096];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buffer[..n]).to_string();
+                    let event = PtyOutputEvent {
+                        session_id: session_id_clone.clone(),
+                        data,
+                    };
+                    let _ = app_handle_clone.emit("pty-output", event);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // Store session
+    let session = PtySession {
+        master,
+        writer,
+        child,
+    };
+
+    PTY_SESSIONS.lock().unwrap().insert(session_id.clone(), session);
+
+    println!("Created PTY session: {}", session_id);
+    Ok(session_id)
+}
+
+#[tauri::command]
+fn write_to_pty(session_id: String, data: String) -> Result<(), String> {
+    let mut sessions = PTY_SESSIONS.lock().unwrap();
+
+    if let Some(session) = sessions.get_mut(&session_id) {
+        session.writer.write_all(data.as_bytes())
+            .map_err(|e| format!("Failed to write to PTY: {}", e))?;
+        session.writer.flush()
+            .map_err(|e| format!("Failed to flush PTY: {}", e))?;
+        Ok(())
+    } else {
+        Err(format!("Session not found: {}", session_id))
+    }
+}
+
+#[tauri::command]
+fn resize_pty(session_id: String, rows: u16, cols: u16) -> Result<(), String> {
+    let sessions = PTY_SESSIONS.lock().unwrap();
+
+    if let Some(session) = sessions.get(&session_id) {
+        session.master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        }).map_err(|e| format!("Failed to resize PTY: {}", e))?;
+
+        Ok(())
+    } else {
+        Err(format!("Session not found: {}", session_id))
+    }
+}
+
+#[tauri::command]
+fn kill_pty_session(session_id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+
+    let mut sessions = PTY_SESSIONS.lock().unwrap();
+
+    if let Some(mut session) = sessions.remove(&session_id) {
+        // Try to kill the child process
+        let _ = session.child.kill();
+
+        // Get exit code
+        let exit_code = session.child.try_wait()
+            .ok()
+            .flatten()
+            .map(|status| status.exit_code());
+
+        // Emit exit event
+        let event = PtyExitEvent {
+            session_id: session_id.clone(),
+            exit_code,
+        };
+        let _ = app_handle.emit("pty-exit", event);
+
+        println!("Killed PTY session: {}", session_id);
+        Ok(())
+    } else {
+        Err(format!("Session not found: {}", session_id))
+    }
+}
+
+#[tauri::command]
+fn get_pty_sessions() -> Vec<String> {
+    PTY_SESSIONS.lock().unwrap().keys().cloned().collect()
+}
+
+// ==================== End PTY Terminal Commands ====================
+
 // Структура для события вывода команды
 #[derive(Serialize, Clone)]
 struct CommandOutputEvent {
@@ -2192,7 +2372,6 @@ async fn show_overlay_button(
     use tauri::WebviewWindowBuilder;
     use tauri::WebviewUrl;
     use tauri::WindowSizeConstraints;
-    use tauri::LogicalSize;
     use tauri::PixelUnit;
     use tauri::LogicalUnit;
 
@@ -2229,11 +2408,11 @@ async fn show_overlay_button(
         .or_else(|| screens.first())
         .ok_or("No screen found")?;
 
-    let display = &current_screen.display_info;
+    let _display = &current_screen.display_info;
 
     // Начальная позиция - центр текущего монитора
-    // let initial_x = display.x as f64 + (display.width as f64 / 2.0) - 100.0;
-    // let initial_y = display.y as f64 + (display.height as f64 / 2.0) - 25.0;
+    // let initial_x = _display.x as f64 + (_display.width as f64 / 2.0) - 100.0;
+    // let initial_y = _display.y as f64 + (_display.height as f64 / 2.0) - 25.0;
 
     let constraints = WindowSizeConstraints {
         min_width: Some(PixelUnit::Logical(LogicalUnit(100.0))),
@@ -2725,7 +2904,12 @@ pub fn run() {
             load_button_templates,
             show_overlay_button,
             hide_overlay_button,
-            execute_button_actions
+            execute_button_actions,
+            create_pty_session,
+            write_to_pty,
+            resize_pty,
+            kill_pty_session,
+            get_pty_sessions
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
