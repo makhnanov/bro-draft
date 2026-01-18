@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "screenshot-popup", "overlay-button"],
+  "windows": ["main", "screenshot-popup", "overlay-button", "terminal-popup-*"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -12,7 +12,8 @@
     "core:window:allow-is-fullscreen",
     "core:window:allow-start-dragging",
     "core:window:allow-set-size",
-    "core:window:allow-set-resizable"
+    "core:window:allow-set-resizable",
+    "core:webview:allow-create-webview-window"
   ],
   "remote": {
     "urls": ["https://api.coingecko.com", "https://*.cloudflare.com", "https://speed.cloudflare.com"]

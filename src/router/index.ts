@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import HomePage from '../pages/HomePage.vue'
 import AliasesPage from '../pages/AliasesPage.vue'
@@ -144,7 +144,7 @@ const routes = [
 
 const router = createRouter({
   history: createWebHashHistory(),
-  routes
+  routes: routes as RouteRecordRaw[]
 })
 
 // Флаг для предотвращения сохранения при первой загрузке

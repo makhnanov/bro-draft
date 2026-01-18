@@ -294,14 +294,25 @@ async function openNewTerminalPopup(project: Project) {
     try {
         const popupId = `terminal-popup-${Date.now()}`;
         const title = `${project.name} - Terminal`;
+        const url = `index.html#/terminal-popup?title=${encodeURIComponent(title)}`;
 
-        new WebviewWindow(popupId, {
-            url: `index.html#/terminal-popup?title=${encodeURIComponent(title)}`,
+        console.log('Opening popup with URL:', url);
+
+        const webview = new WebviewWindow(popupId, {
+            url: url,
             title: title,
             width: 900,
             height: 600,
             resizable: true,
             center: true,
+        });
+
+        webview.once('tauri://created', () => {
+            console.log('Popup window created successfully');
+        });
+
+        webview.once('tauri://error', (e) => {
+            console.error('Failed to create popup window:', e);
         });
     } catch (error) {
         console.error('Failed to open popup:', error);

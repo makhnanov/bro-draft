@@ -1,4 +1,4 @@
 start-development:
-	pnpm i && pnpm build && pnpm tauri dev
+	bun i && bun run build && bun run tauri dev
 test-it:
 	echo test
