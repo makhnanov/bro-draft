@@ -150,6 +150,7 @@ async function openProjectPopup(project: Project) {
             height: 800,
             resizable: true,
             center: true,
+            decorations: false,
         });
 
         // Store popup label on project level
