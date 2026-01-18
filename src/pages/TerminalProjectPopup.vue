@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 
 interface PtyOutputEvent {
@@ -20,6 +21,7 @@ interface Command {
     sessionId: string | null;
     terminal: Terminal | null;
     fitAddon: FitAddon | null;
+    serializeAddon: SerializeAddon | null;
 }
 
 // Nested layout structure
@@ -71,6 +73,7 @@ function loadProjectCommands(): Command[] {
                     sessionId: null,
                     terminal: null,
                     fitAddon: null,
+                    serializeAddon: null,
                 }));
             }
         } catch (e) {
@@ -175,12 +178,15 @@ function saveCommandRefs(node: LayoutNode | null): Map<number, Command> {
 
 // Restore command references after layout modification
 function restoreCommandRefs(node: LayoutNode | null, refs: Map<number, Command>) {
+    console.log('restoreCommandRefs called:', { node: node?.id, type: node?.type, hasChildren: !!node?.children });
     if (!node) return;
     if (node.type === 'terminal' && node.command) {
         const saved = refs.get(node.command.id);
+        console.log('restoreCommandRefs terminal:', { cmdId: node.command.id, found: !!saved, savedSessionId: saved?.sessionId });
         if (saved) {
             node.command.terminal = saved.terminal;
             node.command.fitAddon = saved.fitAddon;
+            node.command.serializeAddon = saved.serializeAddon;
             node.command.sessionId = saved.sessionId;
         }
     }
@@ -209,21 +215,27 @@ async function initTerminal(cmd: Command) {
     });
 
     const fitAddon = new FitAddon();
+    const serializeAddon = new SerializeAddon();
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(serializeAddon);
     terminal.open(container);
 
     setTimeout(() => fitAddon.fit(), 100);
 
     cmd.terminal = terminal;
     cmd.fitAddon = fitAddon;
+    cmd.serializeAddon = serializeAddon;
 
     terminal.onData(async (data) => {
+        console.log('initTerminal onData:', { cmdId: cmd.id, sessionId: cmd.sessionId });
         if (cmd.sessionId) {
             try {
                 await invoke('write_to_pty', { sessionId: cmd.sessionId, data });
             } catch (error) {
                 console.error('Failed to write to PTY:', error);
             }
+        } else {
+            console.warn('initTerminal: No sessionId for terminal:', cmd.id);
         }
     });
 
@@ -362,7 +374,7 @@ function performDrop() {
 
     // Remove dragged node from layout
     const layoutCopy = JSON.parse(JSON.stringify(layout.value, (key, value) => {
-        if (key === 'terminal' || key === 'fitAddon') return undefined;
+        if (key === 'terminal' || key === 'fitAddon' || key === 'serializeAddon') return undefined;
         return value;
     }));
     const newLayout = removeNode(layoutCopy, draggedNodeId.value);
@@ -437,6 +449,8 @@ function performDrop() {
     }
 
     // Restore command references for all terminals
+    console.log('About to call restoreCommandRefs, layout.value:', JSON.stringify(layout.value, (k,v) => ['terminal','fitAddon','serializeAddon'].includes(k) ? '[object]' : v));
+    console.log('commandRefs size:', commandRefs.size, 'keys:', [...commandRefs.keys()]);
     restoreCommandRefs(layout.value, commandRefs);
 
     nextTick(async () => {
@@ -462,16 +476,23 @@ async function recreateTerminal(cmd: Command) {
         resizeObservers.delete(containerId);
     }
 
-    let savedContent: string[] = [];
-    if (cmd.terminal) {
+    // Save content with colors using serializeAddon
+    let savedContent = '';
+    if (cmd.terminal && cmd.serializeAddon) {
+        savedContent = cmd.serializeAddon.serialize();
+        cmd.terminal.dispose();
+    } else if (cmd.terminal) {
+        // Fallback without colors
+        const lines: string[] = [];
         const buffer = cmd.terminal.buffer.active;
         for (let i = 0; i < buffer.length; i++) {
             const line = buffer.getLine(i);
-            if (line) savedContent.push(line.translateToString(true));
+            if (line) lines.push(line.translateToString(true));
         }
-        while (savedContent.length > 0 && savedContent[savedContent.length - 1].trim() === '') {
-            savedContent.pop();
+        while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+            lines.pop();
         }
+        savedContent = lines.join('\r\n') + '\r\n';
         cmd.terminal.dispose();
     }
 
@@ -488,24 +509,37 @@ async function recreateTerminal(cmd: Command) {
     });
 
     const fitAddon = new FitAddon();
+    const serializeAddon = new SerializeAddon();
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(serializeAddon);
     terminal.open(container);
 
-    if (savedContent.length > 0) {
-        terminal.write(savedContent.join('\r\n') + '\r\n');
+    if (savedContent) {
+        terminal.write(savedContent);
     }
 
     setTimeout(() => fitAddon.fit(), 50);
     cmd.terminal = terminal;
     cmd.fitAddon = fitAddon;
+    cmd.serializeAddon = serializeAddon;
+
+    console.log('recreateTerminal done:', { cmdId: cmd.id, sessionId: cmd.sessionId });
+
+    // Update sessionToCmd map to point to current Command object
+    if (cmd.sessionId) {
+        sessionToCmd.set(cmd.sessionId, cmd);
+    }
 
     terminal.onData(async (data) => {
+        console.log('recreateTerminal onData:', { cmdId: cmd.id, sessionId: cmd.sessionId });
         if (cmd.sessionId) {
             try {
                 await invoke('write_to_pty', { sessionId: cmd.sessionId, data });
             } catch (error) {
                 console.error('Failed to write to PTY:', error);
             }
+        } else {
+            console.warn('recreateTerminal: No sessionId for terminal:', cmd.id);
         }
     });
 
@@ -574,6 +608,7 @@ async function addTerminal(afterNode: LayoutNode) {
         sessionId: null,
         terminal: null,
         fitAddon: null,
+        serializeAddon: null,
     };
 
     const newNode: LayoutNode = {
