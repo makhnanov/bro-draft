@@ -15,8 +15,14 @@ const menuTitles = ref(['BroLauncher', 'Multitool', 'CandyShop', 'FastestExecuto
 const currentTitleIndex = ref(0);
 const toggleText = computed(() => menuTitles.value[currentTitleIndex.value]);
 
-// Проверяем, является ли текущая страница area-selector, screenshot-popup или overlay-button
-const isAreaSelector = computed(() => route.path === '/area-selector' || route.path === '/screenshot-popup' || route.path === '/overlay-button');
+// Проверяем, является ли текущая страница popup-страницей (без меню)
+const isAreaSelector = computed(() =>
+  route.path === '/area-selector' ||
+  route.path === '/screenshot-popup' ||
+  route.path === '/overlay-button' ||
+  route.path === '/terminal-popup' ||
+  route.path === '/terminal-project-popup'
+);
 
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value;
