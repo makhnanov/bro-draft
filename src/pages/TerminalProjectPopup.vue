@@ -178,11 +178,9 @@ function saveCommandRefs(node: LayoutNode | null): Map<number, Command> {
 
 // Restore command references after layout modification
 function restoreCommandRefs(node: LayoutNode | null, refs: Map<number, Command>) {
-    console.log('restoreCommandRefs called:', { node: node?.id, type: node?.type, hasChildren: !!node?.children });
     if (!node) return;
     if (node.type === 'terminal' && node.command) {
         const saved = refs.get(node.command.id);
-        console.log('restoreCommandRefs terminal:', { cmdId: node.command.id, found: !!saved, savedSessionId: saved?.sessionId });
         if (saved) {
             node.command.terminal = saved.terminal;
             node.command.fitAddon = saved.fitAddon;
@@ -201,6 +199,9 @@ async function initTerminal(cmd: Command) {
     const containerId = `terminal-${cmd.id}`;
     const container = document.getElementById(containerId);
     if (!container) return;
+
+    // Clear the container before attaching terminal
+    container.innerHTML = '';
 
     const terminal = new Terminal({
         cursorBlink: true,
@@ -226,16 +227,47 @@ async function initTerminal(cmd: Command) {
     cmd.fitAddon = fitAddon;
     cmd.serializeAddon = serializeAddon;
 
-    terminal.onData(async (data) => {
-        console.log('initTerminal onData:', { cmdId: cmd.id, sessionId: cmd.sessionId });
+    // Track sent data to filter out duplicate IME data
+    // Russian keyboard in WebKit sends characters multiple times
+    let lastSentChar = '';
+    let lastSendTime = 0;
+
+    terminal.onData((data) => {
+        console.log('[TERMINAL] onData', {
+            data,
+            charCode: data.charCodeAt(0),
+            dataHex: Array.from(data).map(c => c.charCodeAt(0).toString(16)).join(' '),
+            dataLength: data.length,
+            sessionId: cmd.sessionId
+        });
+
         if (cmd.sessionId) {
-            try {
-                await invoke('write_to_pty', { sessionId: cmd.sessionId, data });
-            } catch (error) {
-                console.error('Failed to write to PTY:', error);
+            const now = Date.now();
+            const isNonAscii = data.charCodeAt(0) > 127;
+            const timeSinceLastSend = now - lastSendTime;
+
+            // Filter duplicate non-ASCII data within 100ms window
+            if (isNonAscii && timeSinceLastSend < 100) {
+                // Skip if it's the same single char we just sent
+                if (data.length === 1 && data === lastSentChar) {
+                    return;
+                }
+                // Skip if it's accumulated data containing what we sent
+                if (data.length > 1 && data.includes(lastSentChar)) {
+                    return;
+                }
             }
-        } else {
-            console.warn('initTerminal: No sessionId for terminal:', cmd.id);
+
+            // Track what we're sending
+            if (isNonAscii && data.length === 1) {
+                lastSentChar = data;
+            } else {
+                lastSentChar = '';
+            }
+            lastSendTime = now;
+
+            console.log('[TERMINAL] Sending to PTY:', { data, charCode: data.charCodeAt(0) });
+            invoke('write_to_pty', { sessionId: cmd.sessionId, data }).catch(console.error);
         }
     });
 
@@ -340,7 +372,6 @@ function onDrag(event: MouseEvent) {
 }
 
 function endDrag() {
-    console.log('endDrag called', { draggedNodeId: draggedNodeId.value, dropTarget: dropTarget.value });
     if (draggedNodeId.value && dropTarget.value) {
         try {
             performDrop();
@@ -356,21 +387,13 @@ function endDrag() {
 }
 
 function performDrop() {
-    console.log('performDrop called');
-    if (!draggedNodeId.value || !dropTarget.value || !layout.value) {
-        console.log('performDrop early return', { draggedNodeId: draggedNodeId.value, dropTarget: dropTarget.value, layout: layout.value });
-        return;
-    }
+    if (!draggedNodeId.value || !dropTarget.value || !layout.value) return;
 
     // Save all command references before modification
     const commandRefs = saveCommandRefs(layout.value);
 
     const draggedNode = findNodeById(layout.value, draggedNodeId.value);
-    console.log('draggedNode:', draggedNode);
-    if (!draggedNode || draggedNode.type !== 'terminal') {
-        console.log('draggedNode not found or not terminal');
-        return;
-    }
+    if (!draggedNode || draggedNode.type !== 'terminal') return;
 
     // Remove dragged node from layout
     const layoutCopy = JSON.parse(JSON.stringify(layout.value, (key, value) => {
@@ -378,7 +401,6 @@ function performDrop() {
         return value;
     }));
     const newLayout = removeNode(layoutCopy, draggedNodeId.value);
-    console.log('newLayout after remove:', newLayout);
 
     // Clone the dragged node for insertion
     const movedNode: LayoutNode = {
@@ -449,8 +471,6 @@ function performDrop() {
     }
 
     // Restore command references for all terminals
-    console.log('About to call restoreCommandRefs, layout.value:', JSON.stringify(layout.value, (k,v) => ['terminal','fitAddon','serializeAddon'].includes(k) ? '[object]' : v));
-    console.log('commandRefs size:', commandRefs.size, 'keys:', [...commandRefs.keys()]);
     restoreCommandRefs(layout.value, commandRefs);
 
     nextTick(async () => {
@@ -476,15 +496,31 @@ async function recreateTerminal(cmd: Command) {
         resizeObservers.delete(containerId);
     }
 
+    // Get terminal and serializeAddon from old command if current doesn't have them
+    let terminalToUse = cmd.terminal;
+    let serializeAddonToUse = cmd.serializeAddon;
+
+    if (cmd.sessionId && !terminalToUse) {
+        const oldCmd = sessionToCmd.get(cmd.sessionId);
+        if (oldCmd && oldCmd !== cmd && oldCmd.terminal) {
+            terminalToUse = oldCmd.terminal;
+            serializeAddonToUse = oldCmd.serializeAddon;
+            // Clear old command references
+            oldCmd.terminal = null;
+            oldCmd.fitAddon = null;
+            oldCmd.serializeAddon = null;
+        }
+    }
+
     // Save content with colors using serializeAddon
     let savedContent = '';
-    if (cmd.terminal && cmd.serializeAddon) {
-        savedContent = cmd.serializeAddon.serialize();
-        cmd.terminal.dispose();
-    } else if (cmd.terminal) {
+    if (terminalToUse && serializeAddonToUse) {
+        savedContent = serializeAddonToUse.serialize();
+        terminalToUse.dispose();
+    } else if (terminalToUse) {
         // Fallback without colors
         const lines: string[] = [];
-        const buffer = cmd.terminal.buffer.active;
+        const buffer = terminalToUse.buffer.active;
         for (let i = 0; i < buffer.length; i++) {
             const line = buffer.getLine(i);
             if (line) lines.push(line.translateToString(true));
@@ -493,8 +529,11 @@ async function recreateTerminal(cmd: Command) {
             lines.pop();
         }
         savedContent = lines.join('\r\n') + '\r\n';
-        cmd.terminal.dispose();
+        terminalToUse.dispose();
     }
+
+    // Clear the container before attaching new terminal
+    container.innerHTML = '';
 
     const terminal = new Terminal({
         cursorBlink: true,
@@ -523,23 +562,52 @@ async function recreateTerminal(cmd: Command) {
     cmd.fitAddon = fitAddon;
     cmd.serializeAddon = serializeAddon;
 
-    console.log('recreateTerminal done:', { cmdId: cmd.id, sessionId: cmd.sessionId });
-
     // Update sessionToCmd map to point to current Command object
     if (cmd.sessionId) {
         sessionToCmd.set(cmd.sessionId, cmd);
     }
 
-    terminal.onData(async (data) => {
-        console.log('recreateTerminal onData:', { cmdId: cmd.id, sessionId: cmd.sessionId });
+    // Track sent data to filter out duplicate IME data
+    // Russian keyboard in WebKit sends characters multiple times
+    let lastSentChar = '';
+    let lastSendTime = 0;
+
+    terminal.onData((data) => {
+        console.log('[TERMINAL] onData', {
+            data,
+            charCode: data.charCodeAt(0),
+            dataHex: Array.from(data).map(c => c.charCodeAt(0).toString(16)).join(' '),
+            dataLength: data.length,
+            sessionId: cmd.sessionId
+        });
+
         if (cmd.sessionId) {
-            try {
-                await invoke('write_to_pty', { sessionId: cmd.sessionId, data });
-            } catch (error) {
-                console.error('Failed to write to PTY:', error);
+            const now = Date.now();
+            const isNonAscii = data.charCodeAt(0) > 127;
+            const timeSinceLastSend = now - lastSendTime;
+
+            // Filter duplicate non-ASCII data within 100ms window
+            if (isNonAscii && timeSinceLastSend < 100) {
+                // Skip if it's the same single char we just sent
+                if (data.length === 1 && data === lastSentChar) {
+                    return;
+                }
+                // Skip if it's accumulated data containing what we sent
+                if (data.length > 1 && data.includes(lastSentChar)) {
+                    return;
+                }
             }
-        } else {
-            console.warn('recreateTerminal: No sessionId for terminal:', cmd.id);
+
+            // Track what we're sending
+            if (isNonAscii && data.length === 1) {
+                lastSentChar = data;
+            } else {
+                lastSentChar = '';
+            }
+            lastSendTime = now;
+
+            console.log('[TERMINAL] Sending to PTY:', { data, charCode: data.charCodeAt(0) });
+            invoke('write_to_pty', { sessionId: cmd.sessionId, data }).catch(console.error);
         }
     });
 
