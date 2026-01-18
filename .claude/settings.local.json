@@ -22,7 +22,8 @@
       "Bash(mv:*)",
       "Bash(mkdir:*)",
       "Bash(pgrep:*)",
-      "Bash(pnpm tauri build:*)"
+      "Bash(pnpm tauri build:*)",
+      "Bash(find:*)"
     ],
     "deny": [
       "Bash(killall:*)",

@@ -15,12 +15,9 @@
 .youtube-page
   display flex
   flex-direction column
-  //justify-content center
-  min-height 60vh
-  padding-top 20px
-  padding-bottom 20px
-  padding-left 25px
-  padding-right 25px
+  height 100%
+  padding 20px
+  box-sizing border-box
 
 .page-title
   font-size 48px

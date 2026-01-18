@@ -168,6 +168,8 @@ function resetSettings() {
     padding 40px
     max-width 900px
     margin 0 auto
+    width 100%
+    box-sizing border-box
 
 .page-title
     font-size 36px

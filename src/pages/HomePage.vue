@@ -17,8 +17,9 @@
   flex-direction column
   align-items center
   justify-content center
-  min-height 60vh
+  height 100%
   padding 20px
+  box-sizing border-box
 
 .page-title
   font-size 48px

@@ -310,7 +310,7 @@ onUnmounted(() => {
             margin-left 0
 
         ~ .main-content
-            margin-left 64px
+            left 64px
 
 .sidebar-toggle
     width 100%
@@ -425,19 +425,24 @@ onUnmounted(() => {
     height 20px
 
 .main-content
-    margin-left 240px
-    // padding 120px 20px 20px 20px
-    transition margin-left 0.3s ease
-    min-height 100vh
+    position fixed
+    top 0
+    left 240px
+    right 0
+    bottom 0
+    transition left 0.3s ease
+    box-sizing border-box
+    overflow-y auto
+    overflow-x hidden
 
     &.fullscreen
-        margin-left 0
+        left 0
         position fixed
         top 0
-        left 0
         width 100vw
         height 100vh
         z-index 99999
+        overflow auto
 </style>
 <style lang="stylus">
 *
