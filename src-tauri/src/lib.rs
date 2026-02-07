@@ -2437,14 +2437,18 @@ async fn show_overlay_button(
     .always_on_top(false)
     .skip_taskbar(true)
     .visible(true)
-    .resizable(false)
+    .resizable(true) // keep true to avoid GTK 200px minimum floor
     // .focused(uefalse)
     .devtools(true)
     .build()
     .unwrap();
     // .map_err(|e| format!("Failed to create overlay button window: {}", e))?;
 
-    // println!("Overlay button window created at {}, {}", initial_x, initial_y);
+    // Force small size via GTK API
+    #[cfg(target_os = "linux")]
+    {
+        force_gtk_window_size(&webview_window, 100, 30);
+    }
 
     let _ = webview_window.set_always_on_top(true);
 
@@ -2469,6 +2473,451 @@ async fn hide_overlay_button(app_handle: tauri::AppHandle) -> Result<(), String>
     // Отправляем событие в главное окно
     if let Some(main_window) = app_handle.get_webview_window("main") {
         let _ = main_window.eval("window.dispatchEvent(new CustomEvent('overlay-button-closed'))");
+    }
+
+    Ok(())
+}
+
+// Force small window size on Linux by bypassing WebKit2GTK's minimum size
+#[cfg(target_os = "linux")]
+fn force_gtk_window_size(webview_window: &tauri::WebviewWindow, width: i32, height: i32) {
+    use gtk::prelude::{WidgetExt, GtkWindowExt, ContainerExt};
+    use gtk::glib::object::Cast;
+    if let Ok(gtk_win) = webview_window.gtk_window() {
+        gtk_win.set_size_request(width, height);
+        // Also force the WebView child widget to accept the small size
+        for child in gtk_win.children() {
+            child.set_size_request(width, height);
+            // Go one level deeper — the vbox contains the webview
+            if let Ok(container) = child.clone().downcast::<gtk::Container>() {
+                for grandchild in container.children() {
+                    grandchild.set_size_request(width, height);
+                }
+            }
+        }
+        gtk_win.set_default_size(width, height);
+        gtk_win.resize(width, height);
+    }
+}
+
+// === Side Button state and commands ===
+
+struct SideButtonState {
+    base_x: i32,
+    base_y: i32,
+    offset_x: i32,
+    offset_y: i32,
+    is_hidden: bool,
+    animation_id: u64,
+    show_completed: bool,
+}
+
+static SIDE_BUTTON_STATES: Lazy<Mutex<HashMap<String, SideButtonState>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+const SIDE_BUTTON_SLIVER: i32 = 3;
+
+#[tauri::command]
+async fn read_icon_base64(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path)
+        .map_err(|e| format!("Failed to read icon file '{}': {}", path, e))?;
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => "image/png",
+    };
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
+#[tauri::command]
+async fn save_side_buttons(json: String) -> Result<(), String> {
+    let home_dir = std::env::var("HOME").map_err(|_| "Failed to get HOME environment variable")?;
+    let app_dir = std::path::PathBuf::from(home_dir).join(".local/share/com.bro.app");
+    std::fs::create_dir_all(&app_dir)
+        .map_err(|e| format!("Failed to create app directory: {}", e))?;
+    let path = app_dir.join("side_buttons.json");
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write side buttons file: {}", e))?;
+    println!("Side buttons saved to {:?}", path);
+    Ok(())
+}
+
+#[tauri::command]
+async fn load_side_buttons() -> Result<String, String> {
+    let home_dir = std::env::var("HOME").map_err(|_| "Failed to get HOME environment variable")?;
+    let path = std::path::PathBuf::from(home_dir).join(".local/share/com.bro.app/side_buttons.json");
+    if path.exists() {
+        let data = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read side buttons file: {}", e))?;
+        Ok(data)
+    } else {
+        Ok("[]".to_string())
+    }
+}
+
+#[tauri::command]
+async fn show_side_button(
+    app_handle: tauri::AppHandle,
+    id: String,
+    name: String,
+    icon_path: String,
+    command: String,
+    edge: String,
+    position: f64,
+) -> Result<(), String> {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+
+    let label = format!("side-button-{}", id);
+
+    // Close existing window if present
+    if let Some(existing) = app_handle.get_webview_window(&label) {
+        let _ = existing.destroy();
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+
+    // Determine window size and position based on edge
+    // 40px icon + 4px padding each side = 48x48
+    let win_w: f64 = 48.0;
+    let win_h: f64 = 48.0;
+
+    // Get screen info
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+    let main_window = app_handle.get_webview_window("main")
+        .ok_or("Main window not found")?;
+    let main_pos = main_window.outer_position()
+        .map_err(|e| format!("Failed to get main window position: {}", e))?;
+
+    let current_screen = screens.iter()
+        .find(|screen| {
+            let d = &screen.display_info;
+            main_pos.x >= d.x &&
+            main_pos.x < d.x + d.width as i32 &&
+            main_pos.y >= d.y &&
+            main_pos.y < d.y + d.height as i32
+        })
+        .or_else(|| screens.first())
+        .ok_or("No screen found")?;
+
+    let d = &current_screen.display_info;
+    let scale = d.scale_factor as f64;
+    let screen_w = d.width as f64 / scale;
+    let screen_h = d.height as f64 / scale;
+    let screen_x = d.x as f64;
+    let screen_y = d.y as f64;
+
+    let (pos_x, pos_y) = match edge.as_str() {
+        "left" => (screen_x, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+        "right" => (screen_x + screen_w - win_w, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+        "top" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y),
+        "bottom" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y + screen_h - win_h),
+        _ => (screen_x + screen_w - win_w, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+    };
+
+    // Simple percent-encoding for URL parameters
+    fn encode_uri_component(s: &str) -> String {
+        let mut result = String::new();
+        for b in s.bytes() {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    result.push(b as char);
+                }
+                _ => {
+                    result.push_str(&format!("%{:02X}", b));
+                }
+            }
+        }
+        result
+    }
+
+    let encoded_icon = encode_uri_component(&icon_path);
+    let encoded_cmd = encode_uri_component(&command);
+    let encoded_name = encode_uri_component(&name);
+
+    let url = format!(
+        "/index.html#/side-button-overlay?id={}&iconPath={}&command={}&edge={}&name={}",
+        id, encoded_icon, encoded_cmd, edge, encoded_name
+    );
+
+    let webview_window = WebviewWindowBuilder::new(
+        &app_handle,
+        &label,
+        WebviewUrl::App(url.into())
+    )
+    .title(&format!("Side Button - {}", name))
+    .position(pos_x, pos_y)
+    .inner_size(win_w, win_h)
+    .min_inner_size(win_w, win_h)
+    .max_inner_size(win_w, win_h)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .visible(true)
+    .resizable(true) // keep true to avoid GTK 200px minimum floor
+    .devtools(true)
+    .build()
+    .map_err(|e| format!("Failed to create side button window: {}", e))?;
+
+    // Force small window size via GTK API (bypass WebKit2GTK minimum)
+    // Also set type hint to Dock so WM doesn't clamp position at screen edges
+    #[cfg(target_os = "linux")]
+    {
+        force_gtk_window_size(&webview_window, win_w as i32, win_h as i32);
+        if let Ok(gtk_win) = webview_window.gtk_window() {
+            use gtk::prelude::GtkWindowExt;
+            gtk_win.set_type_hint(gtk::gdk::WindowTypeHint::Dock);
+        }
+    }
+
+    // Wait for GTK to settle, then measure actual size and compute slide offset
+    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+
+    let actual_size = webview_window.outer_size()
+        .map_err(|e| format!("Failed to get window size: {}", e))?;
+    let actual_pos = webview_window.outer_position()
+        .map_err(|e| format!("Failed to get window position: {}", e))?;
+
+    let aw = actual_size.width as i32;
+    let ah = actual_size.height as i32;
+
+    let (off_x, off_y) = match edge.as_str() {
+        "right"  => (aw - SIDE_BUTTON_SLIVER, 0),
+        "left"   => (-(aw - SIDE_BUTTON_SLIVER), 0),
+        "top"    => (0, -(ah - SIDE_BUTTON_SLIVER)),
+        "bottom" => (0, ah - SIDE_BUTTON_SLIVER),
+        _        => (aw - SIDE_BUTTON_SLIVER, 0),
+    };
+
+    println!("Side button '{}' actual size {}x{}, offset ({}, {}), base ({}, {})",
+             name, aw, ah, off_x, off_y, actual_pos.x, actual_pos.y);
+
+    SIDE_BUTTON_STATES.lock().unwrap().insert(id.clone(), SideButtonState {
+        base_x: actual_pos.x,
+        base_y: actual_pos.y,
+        offset_x: off_x,
+        offset_y: off_y,
+        is_hidden: false,
+        animation_id: 0,
+        show_completed: true, // Window starts in "shown" position
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn slide_side_button_hide(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+    let label = format!("side-button-{}", id);
+    let window = app_handle.get_webview_window(&label)
+        .ok_or("Side button window not found")?;
+
+    let my_id;
+    let (to_x, to_y);
+    let (cur_x, cur_y);
+    {
+        let mut states = SIDE_BUTTON_STATES.lock().unwrap();
+        let state = states.get_mut(&id).ok_or("Side button state not found")?;
+
+        // Read actual current position
+        let pos = window.outer_position()
+            .map_err(|e| format!("Failed to get position: {}", e))?;
+        cur_x = pos.x;
+        cur_y = pos.y;
+
+        // Only update base if SHOW animation had fully completed
+        // (meaning window is at a stable position — either base or user-dragged)
+        // If show_completed is false, the window is mid-animation and position is unreliable
+        if !state.is_hidden && state.show_completed {
+            println!("[SLIDE] HIDE: updating base from ({},{}) to ({},{})",
+                     state.base_x, state.base_y, cur_x, cur_y);
+            state.base_x = cur_x;
+            state.base_y = cur_y;
+        } else {
+            println!("[SLIDE] HIDE: keeping base at ({},{}) (show_completed={}, is_hidden={})",
+                     state.base_x, state.base_y, state.show_completed, state.is_hidden);
+        }
+
+        state.is_hidden = true;
+        state.show_completed = false;
+        state.animation_id += 1;
+        my_id = state.animation_id;
+
+        to_x = state.base_x + state.offset_x;
+        to_y = state.base_y + state.offset_y;
+
+        println!("[SLIDE] HIDE id={}: cur=({},{}) base=({},{}) offset=({},{}) target=({},{}) anim_id={}",
+                 id, cur_x, cur_y, state.base_x, state.base_y,
+                 state.offset_x, state.offset_y, to_x, to_y, my_id);
+    }
+
+    animate_side_button(&window, &id, my_id, cur_x, cur_y, to_x, to_y).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn slide_side_button_show(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+    let label = format!("side-button-{}", id);
+    let window = app_handle.get_webview_window(&label)
+        .ok_or("Side button window not found")?;
+
+    let my_id;
+    let (to_x, to_y);
+    let (cur_x, cur_y);
+    {
+        let mut states = SIDE_BUTTON_STATES.lock().unwrap();
+        let state = states.get_mut(&id).ok_or("Side button state not found")?;
+
+        // Read actual current position (may be mid-animation)
+        let pos = window.outer_position()
+            .map_err(|e| format!("Failed to get position: {}", e))?;
+        cur_x = pos.x;
+        cur_y = pos.y;
+
+        state.is_hidden = false;
+        state.show_completed = false; // Will be set to true when animation completes
+        state.animation_id += 1;
+        my_id = state.animation_id;
+
+        // Always animate to base
+        to_x = state.base_x;
+        to_y = state.base_y;
+
+        println!("[SLIDE] SHOW id={}: cur=({},{}) base=({},{}) target=({},{}) anim_id={}",
+                 id, cur_x, cur_y, state.base_x, state.base_y, to_x, to_y, my_id);
+    }
+
+    let completed = animate_side_button(&window, &id, my_id, cur_x, cur_y, to_x, to_y).await;
+
+    // Mark show as completed only if animation wasn't cancelled
+    if completed {
+        let mut states = SIDE_BUTTON_STATES.lock().unwrap();
+        if let Some(state) = states.get_mut(&id) {
+            if state.animation_id == my_id {
+                state.show_completed = true;
+                println!("[SLIDE] SHOW id={}: show_completed=true", id);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn animate_side_button(
+    window: &tauri::WebviewWindow,
+    id: &str,
+    my_id: u64,
+    from_x: i32, from_y: i32,
+    to_x: i32, to_y: i32,
+) -> bool {
+    // Skip animation if already at target
+    if from_x == to_x && from_y == to_y {
+        println!("[SLIDE] ANIMATE id={} anim_id={}: already at target ({},{}), skipping",
+                 id, my_id, to_x, to_y);
+        return true;
+    }
+
+    let steps = 10;
+    println!("[SLIDE] ANIMATE id={} anim_id={}: ({},{}) -> ({},{})",
+             id, my_id, from_x, from_y, to_x, to_y);
+
+    for i in 1..=steps {
+        // Check if animation was cancelled
+        {
+            let states = SIDE_BUTTON_STATES.lock().unwrap();
+            if let Some(state) = states.get(id) {
+                if state.animation_id != my_id {
+                    println!("[SLIDE] ANIMATE id={} anim_id={}: CANCELLED at step {}/{}",
+                             id, my_id, i, steps);
+                    return false;
+                }
+            } else { return false; }
+        }
+
+        let t = i as f64 / steps as f64;
+        let ease = 1.0 - (1.0 - t).powi(3);
+        let x = from_x as f64 + (to_x - from_x) as f64 * ease;
+        let y = from_y as f64 + (to_y - from_y) as f64 * ease;
+
+        let result = window.set_position(tauri::Position::Physical(
+            tauri::PhysicalPosition::new(x as i32, y as i32)
+        ));
+
+        if let Err(e) = result {
+            println!("[SLIDE] ANIMATE id={}: set_position FAILED at step {}: {}", id, i, e);
+            return false;
+        }
+
+        if i < steps {
+            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
+        }
+    }
+    println!("[SLIDE] ANIMATE id={} anim_id={}: DONE at ({},{})", id, my_id, to_x, to_y);
+    true
+}
+
+#[tauri::command]
+async fn hide_side_button(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+    let label = format!("side-button-{}", id);
+    SIDE_BUTTON_STATES.lock().unwrap().remove(&id);
+    if let Some(window) = app_handle.get_webview_window(&label) {
+        window.destroy().map_err(|e| format!("Failed to destroy side button window: {}", e))?;
+        println!("Side button '{}' destroyed", id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn launch_side_button_app(command: String) -> Result<(), String> {
+    println!("Launching side button app: {}", command);
+
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("Empty command".to_string());
+    }
+
+    let mut cmd = tokio::process::Command::new(parts[0]);
+    if parts.len() > 1 {
+        cmd.args(&parts[1..]);
+    }
+
+    cmd.stdin(std::process::Stdio::null())
+       .stdout(std::process::Stdio::null())
+       .stderr(std::process::Stdio::null());
+
+    cmd.spawn()
+       .map_err(|e| format!("Failed to launch '{}': {}", command, e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn update_side_button_base(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+    let label = format!("side-button-{}", id);
+    let window = app_handle.get_webview_window(&label)
+        .ok_or("Side button window not found")?;
+
+    let pos = window.outer_position()
+        .map_err(|e| format!("Failed to get position: {}", e))?;
+
+    let mut states = SIDE_BUTTON_STATES.lock().unwrap();
+    if let Some(state) = states.get_mut(&id) {
+        println!("[SLIDE] BASE UPDATED via drag: id={} old=({},{}) new=({},{})",
+                 id, state.base_x, state.base_y, pos.x, pos.y);
+        state.base_x = pos.x;
+        state.base_y = pos.y;
+        state.show_completed = true;
+        state.is_hidden = false;
     }
 
     Ok(())
@@ -2905,6 +3354,15 @@ pub fn run() {
             show_overlay_button,
             hide_overlay_button,
             execute_button_actions,
+            read_icon_base64,
+            save_side_buttons,
+            load_side_buttons,
+            show_side_button,
+            hide_side_button,
+            slide_side_button_hide,
+            slide_side_button_show,
+            launch_side_button_app,
+            update_side_button_base,
             create_pty_session,
             write_to_pty,
             resize_pty,

@@ -108,9 +108,14 @@ html, body
   margin 0
   padding 0
   overflow hidden
+  scrollbar-width none
+
+  &::-webkit-scrollbar
+    display none
 
 #app
   display inline-block
+  overflow hidden
 </style>
 
 <style scoped lang="stylus">

@@ -21,7 +21,8 @@ const isAreaSelector = computed(() =>
   route.path === '/screenshot-popup' ||
   route.path === '/overlay-button' ||
   route.path === '/terminal-popup' ||
-  route.path === '/terminal-project-popup'
+  route.path === '/terminal-project-popup' ||
+  route.path === '/side-button-overlay'
 );
 
 function toggleSidebar() {
@@ -258,6 +259,16 @@ onUnmounted(() => {
           <line x1="13" y1="16" x2="18" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
         <span class="nav-text">Workspaces</span>
+      </router-link>
+      <router-link to="/side-menu" class="nav-item">
+        <svg viewBox="0 0 24 24" class="nav-icon">
+          <rect x="1" y="3" width="7" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/>
+          <circle cx="4.5" cy="8" r="1.5" fill="currentColor"/>
+          <circle cx="4.5" cy="12" r="1.5" fill="currentColor"/>
+          <circle cx="4.5" cy="16" r="1.5" fill="currentColor"/>
+          <path d="M12 8h8M12 12h6M12 16h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="nav-text">Side Menu</span>
       </router-link>
       <router-link to="/settings" class="nav-item">
         <svg viewBox="0 0 24 24" class="nav-icon">

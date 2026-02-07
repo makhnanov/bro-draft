@@ -23,7 +23,13 @@
       "Bash(mkdir:*)",
       "Bash(pgrep:*)",
       "Bash(pnpm tauri build:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "WebFetch(domain:docs.gtk.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:discourse.gnome.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npx tauri build:*)",
+      "Bash(bun run tauri:*)"
     ],
     "deny": [
       "Bash(killall:*)",

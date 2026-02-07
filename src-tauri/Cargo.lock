@@ -456,6 +456,7 @@ dependencies = [
  "crossbeam-channel",
  "directories",
  "enigo",
+ "gtk",
  "image",
  "imageproc",
  "local-ip-address",

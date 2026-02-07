@@ -24,6 +24,8 @@ import TerminalPopup from '../pages/TerminalPopup.vue'
 import TerminalProjectPopup from '../pages/TerminalProjectPopup.vue'
 import ButtonsPage from '../pages/ButtonsPage.vue'
 import OverlayButtonPage from '../pages/OverlayButtonPage.vue'
+import SideMenuPage from '../pages/SideMenuPage.vue'
+import SideButtonOverlay from '../pages/SideButtonOverlay.vue'
 
 const routes = [
   {
@@ -145,6 +147,16 @@ const routes = [
     path: '/overlay-button',
     name: 'OverlayButton',
     component: OverlayButtonPage
+  },
+  {
+    path: '/side-menu',
+    name: 'SideMenu',
+    component: SideMenuPage
+  },
+  {
+    path: '/side-button-overlay',
+    name: 'SideButtonOverlay',
+    component: SideButtonOverlay
   }
 ]
 
@@ -177,7 +189,7 @@ router.isReady().then(async () => {
 // Сохраняем маршрут при каждом переходе (кроме начальной загрузки)
 router.afterEach((to) => {
   // Не сохраняем маршрут при начальной загрузке и для popup страниц
-  if (!isInitialLoad && to.path !== '/area-selector' && to.path !== '/screenshot-popup' && to.path !== '/terminal-popup' && to.path !== '/terminal-project-popup') {
+  if (!isInitialLoad && to.path !== '/area-selector' && to.path !== '/screenshot-popup' && to.path !== '/terminal-popup' && to.path !== '/terminal-project-popup' && to.path !== '/side-button-overlay') {
     invoke('save_last_route', { route: to.path }).catch(err => {
       console.error('Failed to save route:', err)
     })
