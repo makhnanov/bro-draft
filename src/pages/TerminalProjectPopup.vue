@@ -53,6 +53,24 @@ const dropTarget = ref<{
     position: 'left' | 'right' | 'top' | 'bottom';
 } | null>(null);
 
+// Auto-hide restart all button after inactivity
+const showRestartAllBtn = ref(true);
+let inactivityTimeout: number | null = null;
+
+function resetInactivityTimer() {
+    showRestartAllBtn.value = true;
+    if (inactivityTimeout) {
+        clearTimeout(inactivityTimeout);
+    }
+    inactivityTimeout = setTimeout(() => {
+        showRestartAllBtn.value = false;
+    }, 5000) as unknown as number;
+}
+
+function handleWindowActivity() {
+    resetInactivityTimer();
+}
+
 async function updateWindowTitle() {
     try {
         const win = getCurrentWindow();
@@ -909,6 +927,12 @@ async function addTerminal(afterNode: LayoutNode) {
 onMounted(async () => {
     await updateWindowTitle();
 
+    // Setup activity listeners for auto-hiding restart button
+    window.addEventListener('mousemove', handleWindowActivity);
+    window.addEventListener('keydown', handleWindowActivity);
+    window.addEventListener('mousedown', handleWindowActivity);
+    resetInactivityTimer();
+
     // Save window state on resize and move
     const win = getCurrentWindow();
     let saveTimeout: number | null = null;
@@ -983,6 +1007,14 @@ async function saveWindowState() {
 
 onUnmounted(async () => {
     if (outputUnlisten) outputUnlisten();
+
+    // Remove activity listeners
+    window.removeEventListener('mousemove', handleWindowActivity);
+    window.removeEventListener('keydown', handleWindowActivity);
+    window.removeEventListener('mousedown', handleWindowActivity);
+    if (inactivityTimeout) {
+        clearTimeout(inactivityTimeout);
+    }
 
     const terminals = getAllTerminalNodes(layout.value);
     for (const node of terminals) {
@@ -1168,7 +1200,12 @@ onUnmounted(async () => {
         </div>
 
         <!-- Restart All Button -->
-        <button class="restart-all-btn" @click="restartAllTerminals" title="Restart all terminals">
+        <button
+            class="restart-all-btn"
+            :class="{ 'hidden': !showRestartAllBtn }"
+            @click="restartAllTerminals"
+            title="Restart all terminals"
+        >
             <svg viewBox="0 0 24 24" class="restart-icon">
                 <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/>
             </svg>
@@ -1385,10 +1422,15 @@ onUnmounted(async () => {
     font-size 12px
     font-weight 500
     cursor pointer
-    transition all 0.2s ease
+    transition all 0.3s ease, opacity 0.3s ease
     z-index 100
     backdrop-filter blur(4px)
     outline none
+    opacity 1
+
+    &.hidden
+        opacity 0
+        pointer-events none
 
     &:hover
         background rgba(80, 80, 80, 0.95)

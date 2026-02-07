@@ -292,8 +292,47 @@ function onDragEnd() {
     saveProjects();
 }
 
+// Check which popup windows are still open and sync state
+async function syncRunningState() {
+    const allWindows = await getAllWebviewWindows();
+
+    for (const project of projects.value) {
+        // Check if any popup for this project is still open
+        const projectPopupPrefix = `terminal-project-${project.id}-`;
+        const hasOpenPopup = allWindows.some(w => w.label.startsWith(projectPopupPrefix));
+
+        if (hasOpenPopup) {
+            project.isRunning = true;
+            // Find the actual popup label
+            const popupWindow = allWindows.find(w => w.label.startsWith(projectPopupPrefix));
+            if (popupWindow) {
+                for (const cmd of project.commands) {
+                    cmd.isRunning = true;
+                    cmd.popupLabel = popupWindow.label;
+                }
+                // Re-attach destroyed listener
+                popupWindow.once('tauri://destroyed', () => {
+                    console.log('Terminal project popup window closed:', project.name);
+                    for (const cmd of project.commands) {
+                        cmd.popupLabel = null;
+                        cmd.isRunning = false;
+                    }
+                    project.isRunning = false;
+                });
+            }
+        } else {
+            project.isRunning = false;
+            for (const cmd of project.commands) {
+                cmd.isRunning = false;
+                cmd.popupLabel = null;
+            }
+        }
+    }
+}
+
 onMounted(async () => {
     loadProjects();
+    await syncRunningState();
     window.addEventListener('storage', onStorageChange);
     // Listen for updates from popup windows
     projectsUpdateUnlisten = await listen('terminal-projects-updated', () => {
@@ -326,22 +365,17 @@ onMounted(async () => {
     });
 });
 
-onUnmounted(async () => {
+onUnmounted(() => {
     window.removeEventListener('storage', onStorageChange);
     if (projectsUpdateUnlisten) projectsUpdateUnlisten();
-    // Close all popup windows when leaving the page
-    for (const project of projects.value) {
-        if (project.isRunning) {
-            await stopProject(project.id);
-        }
-    }
+    // Don't close popup windows - they should be independent
 });
 </script>
 
 <template>
     <div class="page">
         <div class="page-header">
-            <h1 class="page-title">Terminal</h1>
+            <h1 class="page-title">Workspaces</h1>
             <button @click="addProject" class="btn-add">
                 <svg viewBox="0 0 24 24" class="btn-icon">
                     <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>

@@ -82,18 +82,18 @@ async function connectToServer(command: string) {
 <template>
     <div class="page">
         <div class="page-header">
-            <h1 class="page-title">Shell Executors</h1>
+            <h1 class="page-title">Commands</h1>
             <button @click="addServer" class="btn-add">
                 <svg viewBox="0 0 24 24" class="btn-icon">
                     <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
-                Добавить
+                Add
             </button>
         </div>
 
         <div v-if="servers.length === 0" class="empty-state">
-            <p>Нет shell команд. Нажмите "Добавить" для создания.</p>
+            <p>No commands. Click "Add" to create one.</p>
         </div>
 
         <div v-else class="servers-table">
