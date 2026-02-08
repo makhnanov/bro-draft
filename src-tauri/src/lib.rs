@@ -2975,8 +2975,6 @@ async fn start_side_button_drag(
     let label_clone = label.clone();
     let label_for_grab = label.clone();
     let app_for_grab = app_handle.clone();
-    let app_for_others = app_handle.clone();
-    let other_buttons_clone = other_buttons.clone();
 
     app_handle.run_on_main_thread(move || {
         use std::rc::Rc;
@@ -3019,41 +3017,61 @@ async fn start_side_button_drag(
         }
         let seat_for_ungrab = seat.clone();
 
-        // Immediately show all other buttons (move to base position)
-        for (lbl, base_x, base_y, _, _) in &other_buttons_clone {
-            if let Some(win) = app_for_others.get_webview_window(lbl) {
-                let _ = win.set_position(tauri::Position::Physical(
-                    tauri::PhysicalPosition::new(*base_x, *base_y)
-                ));
-            }
-        }
+        // Animation state for other buttons
+        let anim_progress = Rc::new(RefCell::new(0.0f32));
+        let drag_ended = Rc::new(RefCell::new(false));
 
         gtk::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
-            let (_win, mouse_x, mouse_y, mask) = root_window.device_position(&pointer);
+            let ended = *drag_ended.borrow();
 
-            if !mask.contains(gtk::gdk::ModifierType::BUTTON1_MASK) {
-                seat_for_ungrab.ungrab();
+            if !ended {
+                let (_win, mouse_x, mouse_y, mask) = root_window.device_position(&pointer);
 
-                // Hide all other buttons back (move to hidden position)
-                for (lbl, base_x, base_y, off_x, off_y) in &other_buttons_clone {
-                    if let Some(win) = app_clone.get_webview_window(lbl) {
+                if !mask.contains(gtk::gdk::ModifierType::BUTTON1_MASK) {
+                    seat_for_ungrab.ungrab();
+                    *drag_ended.borrow_mut() = true;
+                    if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); }
+                    // Don't break — continue for hide animation
+                } else {
+                    // Move dragged window
+                    let new_x = win_start_x + (mouse_x - start_root_x);
+                    let new_y = win_start_y + (mouse_y - start_root_y);
+                    if let Some(win) = app_clone.get_webview_window(&label_clone) {
                         let _ = win.set_position(tauri::Position::Physical(
-                            tauri::PhysicalPosition::new(base_x + off_x, base_y + off_y)
+                            tauri::PhysicalPosition::new(new_x, new_y)
                         ));
                     }
                 }
-
-                if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); }
-                return gtk::glib::ControlFlow::Break;
             }
 
-            let new_x = win_start_x + (mouse_x - start_root_x);
-            let new_y = win_start_y + (mouse_y - start_root_y);
+            // Animate other buttons: progress 0→1 (show) or 1→0 (hide)
+            let ended_now = *drag_ended.borrow();
+            let mut p = anim_progress.borrow_mut();
+            if !ended_now {
+                *p = (*p + 0.08).min(1.0); // ~200ms to show
+            } else {
+                *p = (*p - 0.06).max(0.0); // ~270ms to hide
+            }
+            // Ease-out quad
+            let t = 1.0 - (1.0 - *p) * (1.0 - *p);
+            let current_p = *p;
+            drop(p);
 
-            if let Some(win) = app_clone.get_webview_window(&label_clone) {
-                let _ = win.set_position(tauri::Position::Physical(
-                    tauri::PhysicalPosition::new(new_x, new_y)
-                ));
+            // Interpolate: hidden=(base+off) → shown=(base), factor t
+            // pos = base + off * (1 - t)
+            for (lbl, base_x, base_y, off_x, off_y) in &other_buttons {
+                let x = *base_x as f32 + *off_x as f32 * (1.0 - t);
+                let y = *base_y as f32 + *off_y as f32 * (1.0 - t);
+                if let Some(win) = app_clone.get_webview_window(lbl) {
+                    let _ = win.set_position(tauri::Position::Physical(
+                        tauri::PhysicalPosition::new(x as i32, y as i32)
+                    ));
+                }
+            }
+
+            // End loop when hide animation is complete
+            if ended_now && current_p <= 0.0 {
+                return gtk::glib::ControlFlow::Break;
             }
 
             gtk::glib::ControlFlow::Continue
