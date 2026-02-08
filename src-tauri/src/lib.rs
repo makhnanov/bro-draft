@@ -2957,11 +2957,26 @@ async fn start_side_button_drag(
     let win_start_x = start_pos.x;
     let win_start_y = start_pos.y;
 
+    // Collect other active button positions for showing/hiding during drag
+    let other_buttons: Vec<(String, i32, i32, i32, i32)> = {
+        let states = SIDE_BUTTON_STATES.lock().unwrap();
+        states.iter()
+            .filter(|(k, _)| *k != &id)
+            .map(|(k, s)| (
+                format!("side-button-{}", k),
+                s.base_x, s.base_y,
+                s.offset_x, s.offset_y,
+            ))
+            .collect()
+    };
+
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
     let app_clone = app_handle.clone();
     let label_clone = label.clone();
     let label_for_grab = label.clone();
     let app_for_grab = app_handle.clone();
+    let app_for_others = app_handle.clone();
+    let other_buttons_clone = other_buttons.clone();
 
     app_handle.run_on_main_thread(move || {
         use std::rc::Rc;
@@ -3004,11 +3019,30 @@ async fn start_side_button_drag(
         }
         let seat_for_ungrab = seat.clone();
 
+        // Immediately show all other buttons (move to base position)
+        for (lbl, base_x, base_y, _, _) in &other_buttons_clone {
+            if let Some(win) = app_for_others.get_webview_window(lbl) {
+                let _ = win.set_position(tauri::Position::Physical(
+                    tauri::PhysicalPosition::new(*base_x, *base_y)
+                ));
+            }
+        }
+
         gtk::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
             let (_win, mouse_x, mouse_y, mask) = root_window.device_position(&pointer);
 
             if !mask.contains(gtk::gdk::ModifierType::BUTTON1_MASK) {
                 seat_for_ungrab.ungrab();
+
+                // Hide all other buttons back (move to hidden position)
+                for (lbl, base_x, base_y, off_x, off_y) in &other_buttons_clone {
+                    if let Some(win) = app_clone.get_webview_window(lbl) {
+                        let _ = win.set_position(tauri::Position::Physical(
+                            tauri::PhysicalPosition::new(base_x + off_x, base_y + off_y)
+                        ));
+                    }
+                }
+
                 if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); }
                 return gtk::glib::ControlFlow::Break;
             }
