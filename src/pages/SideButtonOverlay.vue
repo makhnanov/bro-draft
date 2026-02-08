@@ -80,7 +80,7 @@ function onMouseLeave() {
     hideTimer = window.setTimeout(() => {
       hideTimer = null;
       invoke('slide_side_button_hide', { id: buttonId.value }).catch(console.error);
-    }, 500);
+    }, 200);
   }
 }
 
@@ -156,6 +156,12 @@ async function launchApp() {
   &:active
     cursor grabbing
 
+  &:hover .side-button
+    background #80a9e6
+
+  &:active .side-button
+    background #5c8fd4
+
 .side-button
   width 40px
   height 40px
@@ -168,12 +174,6 @@ async function launchApp() {
   justify-content center
   padding 4px
   transition background 0.15s ease
-
-  &:hover
-    background #80a9e6
-
-  &:active
-    background #5c8fd4
 
 .side-button-icon
   width 100%
