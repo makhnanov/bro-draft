@@ -2516,10 +2516,10 @@ static SIDE_BUTTON_STATES: Lazy<Mutex<HashMap<String, SideButtonState>>> = Lazy:
     Mutex::new(HashMap::new())
 });
 
-const SIDE_BUTTON_SLIVER: i32 = -2;
+const SIDE_BUTTON_SLIVER: i32 = 2;
 // How many pixels past the screen edge the window extends when fully shown,
 // so cursor at screen edge is still inside the window (prevents jitter).
-const SIDE_BUTTON_EDGE_EXTEND: i32 = 6;
+const SIDE_BUTTON_EDGE_EXTEND: i32 = 7;
 
 #[tauri::command]
 async fn read_icon_base64(path: String) -> Result<String, String> {
@@ -2692,37 +2692,22 @@ async fn show_side_button(
         }
     }
 
-    // Wait for GTK to settle, then measure actual size and compute slide offset
+    // Wait for GTK to settle
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
-    let actual_size = webview_window.outer_size()
-        .map_err(|e| format!("Failed to get window size: {}", e))?;
-    let actual_pos = webview_window.outer_position()
-        .map_err(|e| format!("Failed to get window position: {}", e))?;
-
-    let aw = actual_size.width as i32;
-    let ah = actual_size.height as i32;
-
-    let (off_x, off_y) = match edge.as_str() {
-        "right"  => (aw - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND, 0),
-        "left"   => (-(aw - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND), 0),
-        "top"    => (0, -(ah - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND)),
-        "bottom" => (0, ah - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND),
-        _        => (aw - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND, 0),
-    };
-
-    println!("Side button '{}' actual size {}x{}, offset ({}, {}), base ({}, {})",
-             name, aw, ah, off_x, off_y, actual_pos.x, actual_pos.y);
-
+    // Insert placeholder state, then snap to correct edge position
     SIDE_BUTTON_STATES.lock().unwrap().insert(id.clone(), SideButtonState {
-        base_x: actual_pos.x,
-        base_y: actual_pos.y,
-        offset_x: off_x,
-        offset_y: off_y,
+        base_x: 0,
+        base_y: 0,
+        offset_x: 0,
+        offset_y: 0,
         is_hidden: false,
         animation_id: 0,
-        show_completed: true, // Window starts in "shown" position
+        show_completed: true,
     });
+
+    // Snap to nearest edge — this calculates correct base, offset, and persists position
+    update_side_button_base(app_handle, id).await?;
 
     Ok(())
 }
@@ -2761,11 +2746,15 @@ async fn slide_side_button_hide(app_handle: tauri::AppHandle, id: String) -> Res
     });
 
     if let Ok((mx, my)) = cursor_rx.recv() {
-        if mx >= wx && mx < wx + ww && my >= wy && my < wy + wh {
-            println!("[SLIDE] HIDE id={}: SKIPPED — cursor ({},{}) is inside window ({},{} {}x{})",
+        // Use a margin so cursor near the edge still counts as "inside"
+        let margin = 5;
+        if mx >= wx - margin && mx < wx + ww + margin && my >= wy - margin && my < wy + wh + margin {
+            println!("[SLIDE] HIDE id={}: SKIPPED — cursor ({},{}) is near window ({},{} {}x{})",
                      id, mx, my, wx, wy, ww, wh);
             return Ok(());
         }
+        println!("[SLIDE] HIDE id={}: cursor ({},{}) is outside window ({},{} {}x{})",
+                 id, mx, my, wx, wy, ww, wh);
     }
 
     let my_id;
@@ -2971,6 +2960,8 @@ async fn start_side_button_drag(
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
     let app_clone = app_handle.clone();
     let label_clone = label.clone();
+    let label_for_grab = label.clone();
+    let app_for_grab = app_handle.clone();
 
     app_handle.run_on_main_thread(move || {
         use std::rc::Rc;
@@ -2996,10 +2987,28 @@ async fn start_side_button_drag(
             None => { if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); } return; }
         };
 
+        // Grab the pointer on the button's own GDK window (prevents text selection in other apps)
+        if let Some(win) = app_for_grab.get_webview_window(&label_for_grab) {
+            if let Ok(gtk_win) = win.gtk_window() {
+                if let Some(gdk_win) = gtk_win.window() {
+                    let _ = seat.grab(
+                        &gdk_win,
+                        gtk::gdk::SeatCapabilities::POINTER,
+                        true,  // owner_events
+                        None,  // cursor
+                        None,  // event
+                        None::<&mut dyn FnMut(&gtk::gdk::Seat, &gtk::gdk::Window)>,
+                    );
+                }
+            }
+        }
+        let seat_for_ungrab = seat.clone();
+
         gtk::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
             let (_win, mouse_x, mouse_y, mask) = root_window.device_position(&pointer);
 
             if !mask.contains(gtk::gdk::ModifierType::BUTTON1_MASK) {
+                seat_for_ungrab.ungrab();
                 if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); }
                 return gtk::glib::ControlFlow::Break;
             }

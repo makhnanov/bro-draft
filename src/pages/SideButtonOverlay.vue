@@ -111,6 +111,12 @@ async function onContainerMouseDown(event: MouseEvent) {
   }
 
   isDragging = false;
+
+  // Auto-hide after drag+snap
+  hideTimer = window.setTimeout(() => {
+    hideTimer = null;
+    invoke('slide_side_button_hide', { id: buttonId.value }).catch(console.error);
+  }, 500);
 }
 
 async function launchApp() {
