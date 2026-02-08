@@ -2516,8 +2516,10 @@ static SIDE_BUTTON_STATES: Lazy<Mutex<HashMap<String, SideButtonState>>> = Lazy:
     Mutex::new(HashMap::new())
 });
 
-// const SIDE_BUTTON_SLIVER: i32 = 10;
-const SIDE_BUTTON_SLIVER: i32 = 3;
+const SIDE_BUTTON_SLIVER: i32 = 1;
+// How many pixels past the screen edge the window extends when fully shown,
+// so cursor at screen edge is still inside the window (prevents jitter).
+const SIDE_BUTTON_EDGE_EXTEND: i32 = 6;
 
 #[tauri::command]
 async fn read_icon_base64(path: String) -> Result<String, String> {
@@ -2624,12 +2626,13 @@ async fn show_side_button(
         let screen_x = d.x as f64;
         let screen_y = d.y as f64;
 
+        let ext = SIDE_BUTTON_EDGE_EXTEND as f64;
         match edge.as_str() {
-            "left" => (screen_x, screen_y + screen_h * position / 100.0 - win_h / 2.0),
-            "right" => (screen_x + screen_w - win_w, screen_y + screen_h * position / 100.0 - win_h / 2.0),
-            "top" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y),
-            "bottom" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y + screen_h - win_h),
-            _ => (screen_x + screen_w - win_w, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+            "left" => (screen_x - ext, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+            "right" => (screen_x + screen_w - win_w + ext, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+            "top" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y - ext),
+            "bottom" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y + screen_h - win_h + ext),
+            _ => (screen_x + screen_w - win_w + ext, screen_y + screen_h * position / 100.0 - win_h / 2.0),
         }
     };
 
@@ -2701,11 +2704,11 @@ async fn show_side_button(
     let ah = actual_size.height as i32;
 
     let (off_x, off_y) = match edge.as_str() {
-        "right"  => (aw - SIDE_BUTTON_SLIVER, 0),
-        "left"   => (-(aw - SIDE_BUTTON_SLIVER), 0),
-        "top"    => (0, -(ah - SIDE_BUTTON_SLIVER)),
-        "bottom" => (0, ah - SIDE_BUTTON_SLIVER),
-        _        => (aw - SIDE_BUTTON_SLIVER, 0),
+        "right"  => (aw - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND, 0),
+        "left"   => (-(aw - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND), 0),
+        "top"    => (0, -(ah - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND)),
+        "bottom" => (0, ah - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND),
+        _        => (aw - SIDE_BUTTON_SLIVER - SIDE_BUTTON_EDGE_EXTEND, 0),
     };
 
     println!("Side button '{}' actual size {}x{}, offset ({}, {}), base ({}, {})",
@@ -2730,6 +2733,41 @@ async fn slide_side_button_hide(app_handle: tauri::AppHandle, id: String) -> Res
     let window = app_handle.get_webview_window(&label)
         .ok_or("Side button window not found")?;
 
+    // Check if cursor is actually outside the window via GDK before hiding
+    let win_pos = window.outer_position()
+        .map_err(|e| format!("Failed to get position: {}", e))?;
+    let win_size = window.outer_size()
+        .map_err(|e| format!("Failed to get size: {}", e))?;
+    let wx = win_pos.x;
+    let wy = win_pos.y;
+    let ww = win_size.width as i32;
+    let wh = win_size.height as i32;
+
+    let (cursor_tx, cursor_rx) = std::sync::mpsc::sync_channel::<(i32, i32)>(1);
+    let _ = app_handle.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        if let Some(display) = gtk::gdk::Display::default() {
+            if let Some(seat) = display.default_seat() {
+                if let Some(pointer) = seat.pointer() {
+                    if let Some(root) = display.default_screen().root_window() {
+                        let (_win, mx, my, _mask) = root.device_position(&pointer);
+                        let _ = cursor_tx.send((mx, my));
+                        return;
+                    }
+                }
+            }
+        }
+        let _ = cursor_tx.send((-9999, -9999));
+    });
+
+    if let Ok((mx, my)) = cursor_rx.recv() {
+        if mx >= wx && mx < wx + ww && my >= wy && my < wy + wh {
+            println!("[SLIDE] HIDE id={}: SKIPPED — cursor ({},{}) is inside window ({},{} {}x{})",
+                     id, mx, my, wx, wy, ww, wh);
+            return Ok(());
+        }
+    }
+
     let my_id;
     let (to_x, to_y);
     let (cur_x, cur_y);
@@ -2737,15 +2775,9 @@ async fn slide_side_button_hide(app_handle: tauri::AppHandle, id: String) -> Res
         let mut states = SIDE_BUTTON_STATES.lock().unwrap();
         let state = states.get_mut(&id).ok_or("Side button state not found")?;
 
-        // Read actual current position
-        let pos = window.outer_position()
-            .map_err(|e| format!("Failed to get position: {}", e))?;
-        cur_x = pos.x;
-        cur_y = pos.y;
+        cur_x = wx;
+        cur_y = wy;
 
-        // Only update base if SHOW animation had fully completed
-        // (meaning window is at a stable position — either base or user-dragged)
-        // If show_completed is false, the window is mid-animation and position is unreliable
         if !state.is_hidden && state.show_completed {
             println!("[SLIDE] HIDE: updating base from ({},{}) to ({},{})",
                      state.base_x, state.base_y, cur_x, cur_y);
@@ -2894,9 +2926,20 @@ async fn launch_side_button_app(command: String) -> Result<(), String> {
         return Err("Empty command".to_string());
     }
 
-    let mut cmd = tokio::process::Command::new(parts[0]);
+    use std::os::unix::process::CommandExt;
+
+    let mut cmd = std::process::Command::new(parts[0]);
     if parts.len() > 1 {
         cmd.args(&parts[1..]);
+    }
+
+    // Detach: new session so child survives parent exit
+    unsafe {
+        cmd.pre_exec(|| {
+            extern "C" { fn setsid() -> i32; }
+            setsid();
+            Ok(())
+        });
     }
 
     cmd.stdin(std::process::Stdio::null())
@@ -3027,14 +3070,15 @@ async fn update_side_button_base(app_handle: tauri::AppHandle, id: String) -> Re
 
     let min_dist = dist_left.min(dist_right).min(dist_top).min(dist_bottom);
 
+    let ext = SIDE_BUTTON_EDGE_EXTEND;
     let (snap_x, snap_y, off_x, off_y) = if min_dist == dist_right {
-        (sx + sw - ww, wy, ww - SIDE_BUTTON_SLIVER, 0)
+        (sx + sw - ww + ext, wy, ww - SIDE_BUTTON_SLIVER - ext, 0)
     } else if min_dist == dist_left {
-        (sx, wy, -(ww - SIDE_BUTTON_SLIVER), 0)
+        (sx - ext, wy, -(ww - SIDE_BUTTON_SLIVER - ext), 0)
     } else if min_dist == dist_bottom {
-        (wx, sy + sh - wh, 0, wh - SIDE_BUTTON_SLIVER)
+        (wx, sy + sh - wh + ext, 0, wh - SIDE_BUTTON_SLIVER - ext)
     } else {
-        (wx, sy, 0, -(wh - SIDE_BUTTON_SLIVER))
+        (wx, sy - ext, 0, -(wh - SIDE_BUTTON_SLIVER - ext))
     };
 
     // Snap window to nearest edge

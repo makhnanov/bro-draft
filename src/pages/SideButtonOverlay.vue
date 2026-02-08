@@ -170,10 +170,10 @@ async function launchApp() {
   transition background 0.15s ease
 
   &:hover
-    background #f0f1f3
+    background #80a9e6
 
   &:active
-    background #e0e1e3
+    background #5c8fd4
 
 .side-button-icon
   width 100%
