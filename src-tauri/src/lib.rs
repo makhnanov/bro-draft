@@ -2516,7 +2516,7 @@ static SIDE_BUTTON_STATES: Lazy<Mutex<HashMap<String, SideButtonState>>> = Lazy:
     Mutex::new(HashMap::new())
 });
 
-const SIDE_BUTTON_SLIVER: i32 = 1;
+const SIDE_BUTTON_SLIVER: i32 = -2;
 // How many pixels past the screen edge the window extends when fully shown,
 // so cursor at screen edge is still inside the window (prevents jitter).
 const SIDE_BUTTON_EDGE_EXTEND: i32 = 6;
