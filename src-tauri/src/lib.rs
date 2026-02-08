@@ -3108,6 +3108,61 @@ async fn update_side_button_base(app_handle: tauri::AppHandle, id: String) -> Re
     }
     drop(states);
 
+    // Set flipped cursor for right-edge buttons
+    let needs_hflip = min_dist == dist_right;
+    let app_for_cursor = app_handle.clone();
+    let label_for_cursor = label.clone();
+    let _ = app_handle.run_on_main_thread(move || {
+        use gtk::prelude::*;
+
+        let display = match gtk::gdk::Display::default() {
+            Some(d) => d,
+            None => return,
+        };
+
+        let gdk_win = match app_for_cursor.get_webview_window(&label_for_cursor)
+            .and_then(|w| w.gtk_window().ok())
+            .and_then(|gtk_win| gtk_win.window())
+        {
+            Some(w) => w,
+            None => return,
+        };
+
+        if !needs_hflip {
+            gdk_win.set_cursor(None::<&gtk::gdk::Cursor>);
+            return;
+        }
+
+        // Get the default cursor and extract its image
+        let cursor = match gtk::gdk::Cursor::from_name(&display, "default") {
+            Some(c) => c,
+            None => return,
+        };
+        let pixbuf = match cursor.image() {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Read hotspot from pixbuf metadata
+        let hot_x: i32 = pixbuf.option("x_hot")
+            .and_then(|v| v.parse().ok()).unwrap_or(0);
+        let hot_y: i32 = pixbuf.option("y_hot")
+            .and_then(|v| v.parse().ok()).unwrap_or(0);
+
+        // Flip horizontally
+        let flipped = match pixbuf.flip(true) {
+            Some(f) => f,
+            None => return,
+        };
+
+        // Mirror the hotspot x coordinate
+        let new_hot_x = flipped.width() - 1 - hot_x;
+        let flipped_cursor = gtk::gdk::Cursor::from_pixbuf(
+            &display, &flipped, new_hot_x, hot_y,
+        );
+        gdk_win.set_cursor(Some(&flipped_cursor));
+    });
+
     // Persist snapped position to side_buttons.json
     let home_dir = std::env::var("HOME").unwrap_or_default();
     let path = std::path::PathBuf::from(&home_dir).join(".local/share/com.bro.app/side_buttons.json");
