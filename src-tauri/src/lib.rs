@@ -2576,6 +2576,8 @@ async fn show_side_button(
     command: String,
     edge: String,
     position: f64,
+    last_x: Option<i32>,
+    last_y: Option<i32>,
 ) -> Result<(), String> {
     use tauri::WebviewWindowBuilder;
     use tauri::WebviewUrl;
@@ -2593,37 +2595,42 @@ async fn show_side_button(
     let win_w: f64 = 48.0;
     let win_h: f64 = 48.0;
 
-    // Get screen info
-    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
-    let main_window = app_handle.get_webview_window("main")
-        .ok_or("Main window not found")?;
-    let main_pos = main_window.outer_position()
-        .map_err(|e| format!("Failed to get main window position: {}", e))?;
+    let (pos_x, pos_y) = if let (Some(lx), Some(ly)) = (last_x, last_y) {
+        // Use saved position from previous drag
+        (lx as f64, ly as f64)
+    } else {
+        // Calculate default position from edge + percentage
+        let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+        let main_window = app_handle.get_webview_window("main")
+            .ok_or("Main window not found")?;
+        let main_pos = main_window.outer_position()
+            .map_err(|e| format!("Failed to get main window position: {}", e))?;
 
-    let current_screen = screens.iter()
-        .find(|screen| {
-            let d = &screen.display_info;
-            main_pos.x >= d.x &&
-            main_pos.x < d.x + d.width as i32 &&
-            main_pos.y >= d.y &&
-            main_pos.y < d.y + d.height as i32
-        })
-        .or_else(|| screens.first())
-        .ok_or("No screen found")?;
+        let current_screen = screens.iter()
+            .find(|screen| {
+                let d = &screen.display_info;
+                main_pos.x >= d.x &&
+                main_pos.x < d.x + d.width as i32 &&
+                main_pos.y >= d.y &&
+                main_pos.y < d.y + d.height as i32
+            })
+            .or_else(|| screens.first())
+            .ok_or("No screen found")?;
 
-    let d = &current_screen.display_info;
-    let scale = d.scale_factor as f64;
-    let screen_w = d.width as f64 / scale;
-    let screen_h = d.height as f64 / scale;
-    let screen_x = d.x as f64;
-    let screen_y = d.y as f64;
+        let d = &current_screen.display_info;
+        let scale = d.scale_factor as f64;
+        let screen_w = d.width as f64 / scale;
+        let screen_h = d.height as f64 / scale;
+        let screen_x = d.x as f64;
+        let screen_y = d.y as f64;
 
-    let (pos_x, pos_y) = match edge.as_str() {
-        "left" => (screen_x, screen_y + screen_h * position / 100.0 - win_h / 2.0),
-        "right" => (screen_x + screen_w - win_w, screen_y + screen_h * position / 100.0 - win_h / 2.0),
-        "top" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y),
-        "bottom" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y + screen_h - win_h),
-        _ => (screen_x + screen_w - win_w, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+        match edge.as_str() {
+            "left" => (screen_x, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+            "right" => (screen_x + screen_w - win_w, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+            "top" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y),
+            "bottom" => (screen_x + screen_w * position / 100.0 - win_w / 2.0, screen_y + screen_h - win_h),
+            _ => (screen_x + screen_w - win_w, screen_y + screen_h * position / 100.0 - win_h / 2.0),
+        }
     };
 
     // Simple percent-encoding for URL parameters
@@ -3045,6 +3052,27 @@ async fn update_side_button_base(app_handle: tauri::AppHandle, id: String) -> Re
         state.offset_y = off_y;
         state.show_completed = true;
         state.is_hidden = false;
+    }
+    drop(states);
+
+    // Persist snapped position to side_buttons.json
+    let home_dir = std::env::var("HOME").unwrap_or_default();
+    let path = std::path::PathBuf::from(&home_dir).join(".local/share/com.bro.app/side_buttons.json");
+    if path.exists() {
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(mut arr) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+                for item in arr.iter_mut() {
+                    if item.get("id").and_then(|v| v.as_str()) == Some(&id) {
+                        item["lastX"] = serde_json::json!(snap_x);
+                        item["lastY"] = serde_json::json!(snap_y);
+                        break;
+                    }
+                }
+                if let Ok(json) = serde_json::to_string(&arr) {
+                    let _ = std::fs::write(&path, json);
+                }
+            }
+        }
     }
 
     Ok(())

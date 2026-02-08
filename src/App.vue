@@ -79,6 +79,7 @@ onMounted(async () => {
         const buttons = JSON.parse(saved) as Array<{
           id: string; name: string; iconPath: string;
           command: string; edge: string; position: number; isActive: boolean;
+          lastX?: number; lastY?: number;
         }>;
         for (const btn of buttons) {
           if (btn.isActive) {
@@ -89,6 +90,8 @@ onMounted(async () => {
               command: btn.command,
               edge: btn.edge,
               position: btn.position,
+              lastX: btn.lastX ?? null,
+              lastY: btn.lastY ?? null,
             }).catch(err => console.error('Failed to restore side button:', btn.name, err));
           }
         }

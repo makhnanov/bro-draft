@@ -11,6 +11,8 @@ interface SideButton {
   edge: 'left' | 'right' | 'top' | 'bottom';
   position: number;
   isActive: boolean;
+  lastX?: number;
+  lastY?: number;
 }
 
 const buttons = ref<SideButton[]>([]);
@@ -174,7 +176,9 @@ async function activateButton(button: SideButton) {
       iconPath: button.iconPath,
       command: button.command,
       edge: button.edge,
-      position: button.position
+      position: button.position,
+      lastX: button.lastX ?? null,
+      lastY: button.lastY ?? null,
     });
     button.isActive = true;
     saveButtons();
@@ -247,7 +251,6 @@ function edgeLabel(edge: string): string {
               <button @click="deleteButton(btn.id)" class="btn btn-delete">Delete</button>
             </div>
           </div>
-          <div v-if="btn.isActive" class="active-badge">Active</div>
         </div>
       </div>
 
