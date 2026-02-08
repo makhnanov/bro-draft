@@ -125,6 +125,8 @@ async function launchApp() {
   } catch (error) {
     console.error('Error launching app:', error);
   }
+  // Hide button after launching the app (force=true to skip cursor check)
+  invoke('slide_side_button_hide', { id: buttonId.value, force: true }).catch(console.error);
 }
 </script>
 

@@ -2713,48 +2713,49 @@ async fn show_side_button(
 }
 
 #[tauri::command]
-async fn slide_side_button_hide(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+async fn slide_side_button_hide(app_handle: tauri::AppHandle, id: String, force: Option<bool>) -> Result<(), String> {
     let label = format!("side-button-{}", id);
     let window = app_handle.get_webview_window(&label)
         .ok_or("Side button window not found")?;
 
-    // Check if cursor is actually outside the window via GDK before hiding
     let win_pos = window.outer_position()
         .map_err(|e| format!("Failed to get position: {}", e))?;
-    let win_size = window.outer_size()
-        .map_err(|e| format!("Failed to get size: {}", e))?;
     let wx = win_pos.x;
     let wy = win_pos.y;
-    let ww = win_size.width as i32;
-    let wh = win_size.height as i32;
+    let ww: i32 = 48;
+    let wh: i32 = 48;
 
-    let (cursor_tx, cursor_rx) = std::sync::mpsc::sync_channel::<(i32, i32)>(1);
-    let _ = app_handle.run_on_main_thread(move || {
-        use gtk::prelude::*;
-        if let Some(display) = gtk::gdk::Display::default() {
-            if let Some(seat) = display.default_seat() {
-                if let Some(pointer) = seat.pointer() {
-                    if let Some(root) = display.default_screen().root_window() {
-                        let (_win, mx, my, _mask) = root.device_position(&pointer);
-                        let _ = cursor_tx.send((mx, my));
-                        return;
+    // Skip cursor check when force=true (e.g. after launching an app)
+    if !force.unwrap_or(false) {
+        // Check if cursor is actually outside the window via GDK before hiding
+        let (cursor_tx, cursor_rx) = std::sync::mpsc::sync_channel::<(i32, i32)>(1);
+        let _ = app_handle.run_on_main_thread(move || {
+            use gtk::prelude::*;
+            if let Some(display) = gtk::gdk::Display::default() {
+                if let Some(seat) = display.default_seat() {
+                    if let Some(pointer) = seat.pointer() {
+                        if let Some(root) = display.default_screen().root_window() {
+                            let (_win, mx, my, _mask) = root.device_position(&pointer);
+                            let _ = cursor_tx.send((mx, my));
+                            return;
+                        }
                     }
                 }
             }
-        }
-        let _ = cursor_tx.send((-9999, -9999));
-    });
+            let _ = cursor_tx.send((-9999, -9999));
+        });
 
-    if let Ok((mx, my)) = cursor_rx.recv() {
-        // Use a margin so cursor near the edge still counts as "inside"
-        let margin = 5;
-        if mx >= wx - margin && mx < wx + ww + margin && my >= wy - margin && my < wy + wh + margin {
-            println!("[SLIDE] HIDE id={}: SKIPPED — cursor ({},{}) is near window ({},{} {}x{})",
+        if let Ok((mx, my)) = cursor_rx.recv() {
+            // Use a margin so cursor near the edge still counts as "inside"
+            let margin = 5;
+            if mx >= wx - margin && mx < wx + ww + margin && my >= wy - margin && my < wy + wh + margin {
+                println!("[SLIDE] HIDE id={}: SKIPPED — cursor ({},{}) is near window ({},{} {}x{})",
+                         id, mx, my, wx, wy, ww, wh);
+                return Ok(());
+            }
+            println!("[SLIDE] HIDE id={}: cursor ({},{}) is outside window ({},{} {}x{})",
                      id, mx, my, wx, wy, ww, wh);
-            return Ok(());
         }
-        println!("[SLIDE] HIDE id={}: cursor ({},{}) is outside window ({},{} {}x{})",
-                 id, mx, my, wx, wy, ww, wh);
     }
 
     let my_id;
@@ -3095,13 +3096,13 @@ async fn update_side_button_base(app_handle: tauri::AppHandle, id: String) -> Re
 
     let pos = window.outer_position()
         .map_err(|e| format!("Failed to get position: {}", e))?;
-    let size = window.outer_size()
-        .map_err(|e| format!("Failed to get size: {}", e))?;
 
     let wx = pos.x;
     let wy = pos.y;
-    let ww = size.width as i32;
-    let wh = size.height as i32;
+    // Use the expected 48x48 size instead of outer_size() because GTK may not
+    // have finished processing force_gtk_window_size yet, returning a wrong size.
+    let ww: i32 = 48;
+    let wh: i32 = 48;
 
     // Find which screen the window center is on
     let cx = wx + ww / 2;

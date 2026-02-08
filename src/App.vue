@@ -83,16 +83,20 @@ onMounted(async () => {
         }>;
         for (const btn of buttons) {
           if (btn.isActive) {
-            invoke('show_side_button', {
-              id: btn.id,
-              name: btn.name,
-              iconPath: btn.iconPath,
-              command: btn.command,
-              edge: btn.edge,
-              position: btn.position,
-              lastX: btn.lastX ?? null,
-              lastY: btn.lastY ?? null,
-            }).catch(err => console.error('Failed to restore side button:', btn.name, err));
+            try {
+              await invoke('show_side_button', {
+                id: btn.id,
+                name: btn.name,
+                iconPath: btn.iconPath,
+                command: btn.command,
+                edge: btn.edge,
+                position: btn.position,
+                lastX: btn.lastX ?? null,
+                lastY: btn.lastY ?? null,
+              });
+            } catch (err) {
+              console.error('Failed to restore side button:', btn.name, err);
+            }
           }
         }
       }
