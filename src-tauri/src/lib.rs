@@ -2516,6 +2516,7 @@ static SIDE_BUTTON_STATES: Lazy<Mutex<HashMap<String, SideButtonState>>> = Lazy:
     Mutex::new(HashMap::new())
 });
 
+// const SIDE_BUTTON_SLIVER: i32 = 10;
 const SIDE_BUTTON_SLIVER: i32 = 3;
 
 #[tauri::command]
@@ -2902,6 +2903,80 @@ async fn launch_side_button_app(command: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn start_side_button_drag(
+    app_handle: tauri::AppHandle,
+    id: String,
+    start_root_x: i32,
+    start_root_y: i32,
+) -> Result<(), String> {
+    let label = format!("side-button-{}", id);
+    let window = app_handle.get_webview_window(&label)
+        .ok_or("Side button window not found")?;
+
+    let start_pos = window.outer_position()
+        .map_err(|e| format!("Failed to get position: {}", e))?;
+    let win_start_x = start_pos.x;
+    let win_start_y = start_pos.y;
+
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    let app_clone = app_handle.clone();
+    let label_clone = label.clone();
+
+    app_handle.run_on_main_thread(move || {
+        use std::rc::Rc;
+        use std::cell::RefCell;
+        use gtk::prelude::*;
+
+        let tx = Rc::new(RefCell::new(Some(tx)));
+
+        let display = match gtk::gdk::Display::default() {
+            Some(d) => d,
+            None => { if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); } return; }
+        };
+        let seat = match display.default_seat() {
+            Some(s) => s,
+            None => { if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); } return; }
+        };
+        let pointer = match seat.pointer() {
+            Some(p) => p,
+            None => { if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); } return; }
+        };
+        let root_window = match display.default_screen().root_window() {
+            Some(w) => w,
+            None => { if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); } return; }
+        };
+
+        gtk::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
+            let (_win, mouse_x, mouse_y, mask) = root_window.device_position(&pointer);
+
+            if !mask.contains(gtk::gdk::ModifierType::BUTTON1_MASK) {
+                if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); }
+                return gtk::glib::ControlFlow::Break;
+            }
+
+            let new_x = win_start_x + (mouse_x - start_root_x);
+            let new_y = win_start_y + (mouse_y - start_root_y);
+
+            if let Some(win) = app_clone.get_webview_window(&label_clone) {
+                let _ = win.set_position(tauri::Position::Physical(
+                    tauri::PhysicalPosition::new(new_x, new_y)
+                ));
+            }
+
+            gtk::glib::ControlFlow::Continue
+        });
+    }).map_err(|e| format!("Main thread error: {:?}", e))?;
+
+    // Wait for drag to complete (blocks this async task, not the main thread)
+    let _ = rx.recv();
+
+    // Snap to nearest edge
+    update_side_button_base(app_handle, id).await?;
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn update_side_button_base(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
     let label = format!("side-button-{}", id);
     let window = app_handle.get_webview_window(&label)
@@ -2909,13 +2984,65 @@ async fn update_side_button_base(app_handle: tauri::AppHandle, id: String) -> Re
 
     let pos = window.outer_position()
         .map_err(|e| format!("Failed to get position: {}", e))?;
+    let size = window.outer_size()
+        .map_err(|e| format!("Failed to get size: {}", e))?;
+
+    let wx = pos.x;
+    let wy = pos.y;
+    let ww = size.width as i32;
+    let wh = size.height as i32;
+
+    // Find which screen the window center is on
+    let cx = wx + ww / 2;
+    let cy = wy + wh / 2;
+
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+    let screen = screens.iter()
+        .find(|s| {
+            let d = &s.display_info;
+            cx >= d.x && cx < d.x + d.width as i32 &&
+            cy >= d.y && cy < d.y + d.height as i32
+        })
+        .or_else(|| screens.first())
+        .ok_or("No screen found")?;
+
+    let d = &screen.display_info;
+    let sx = d.x;
+    let sy = d.y;
+    let sw = d.width as i32;
+    let sh = d.height as i32;
+
+    // Calculate distances to each edge
+    let dist_left = (wx - sx).abs();
+    let dist_right = ((sx + sw) - (wx + ww)).abs();
+    let dist_top = (wy - sy).abs();
+    let dist_bottom = ((sy + sh) - (wy + wh)).abs();
+
+    let min_dist = dist_left.min(dist_right).min(dist_top).min(dist_bottom);
+
+    let (snap_x, snap_y, off_x, off_y) = if min_dist == dist_right {
+        (sx + sw - ww, wy, ww - SIDE_BUTTON_SLIVER, 0)
+    } else if min_dist == dist_left {
+        (sx, wy, -(ww - SIDE_BUTTON_SLIVER), 0)
+    } else if min_dist == dist_bottom {
+        (wx, sy + sh - wh, 0, wh - SIDE_BUTTON_SLIVER)
+    } else {
+        (wx, sy, 0, -(wh - SIDE_BUTTON_SLIVER))
+    };
+
+    // Snap window to nearest edge
+    let _ = window.set_position(tauri::Position::Physical(
+        tauri::PhysicalPosition::new(snap_x, snap_y)
+    ));
 
     let mut states = SIDE_BUTTON_STATES.lock().unwrap();
     if let Some(state) = states.get_mut(&id) {
-        println!("[SLIDE] BASE UPDATED via drag: id={} old=({},{}) new=({},{})",
-                 id, state.base_x, state.base_y, pos.x, pos.y);
-        state.base_x = pos.x;
-        state.base_y = pos.y;
+        println!("[SLIDE] SNAP to edge: id={} drag=({},{}) snap=({},{}) offset=({},{})",
+                 id, wx, wy, snap_x, snap_y, off_x, off_y);
+        state.base_x = snap_x;
+        state.base_y = snap_y;
+        state.offset_x = off_x;
+        state.offset_y = off_y;
         state.show_completed = true;
         state.is_hidden = false;
     }
@@ -3362,6 +3489,7 @@ pub fn run() {
             slide_side_button_hide,
             slide_side_button_show,
             launch_side_button_app,
+            start_side_button_drag,
             update_side_button_base,
             create_pty_session,
             write_to_pty,

@@ -71,6 +71,33 @@ onMounted(async () => {
     console.error('Failed to initialize microphone service:', error);
   }
 
+  // Auto-show side buttons that were active before app restart (only in main window)
+  if (getCurrentWindow().label === 'main') {
+    try {
+      const saved = await invoke<string>('load_side_buttons');
+      if (saved) {
+        const buttons = JSON.parse(saved) as Array<{
+          id: string; name: string; iconPath: string;
+          command: string; edge: string; position: number; isActive: boolean;
+        }>;
+        for (const btn of buttons) {
+          if (btn.isActive) {
+            invoke('show_side_button', {
+              id: btn.id,
+              name: btn.name,
+              iconPath: btn.iconPath,
+              command: btn.command,
+              edge: btn.edge,
+              position: btn.position,
+            }).catch(err => console.error('Failed to restore side button:', btn.name, err));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to restore side buttons:', error);
+    }
+  }
+
   // Глобальный обработчик для Ctrl+PrintScreen - захват скриншота и переключение на Screenshots
   window.addEventListener('translation-hotkey-pressed', async () => {
     console.log('Global translation hotkey handler triggered');

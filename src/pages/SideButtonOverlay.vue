@@ -1,17 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow, PhysicalPosition } from '@tauri-apps/api/window';
 
 const iconDataUri = ref('');
 const command = ref('');
 const buttonId = ref('');
 
 let isDragging = false;
-let dragStartX = 0;
-let dragStartY = 0;
-let windowStartX = 0;
-let windowStartY = 0;
+let hideTimer: number | null = null;
 
 onMounted(async () => {
   const params = new URLSearchParams(window.location.hash.split('?')[1]);
@@ -42,19 +38,20 @@ onMounted(async () => {
   }
 
   window.addEventListener('keydown', handleEscape);
-  window.addEventListener('mousemove', onGlobalMouseMove);
-  window.addEventListener('mouseup', onGlobalMouseUp);
 
-  // Auto-hide after delay — Rust handles the window movement
-  setTimeout(() => {
+  // Auto-hide after delay
+  hideTimer = window.setTimeout(() => {
+    hideTimer = null;
     invoke('slide_side_button_hide', { id: buttonId.value }).catch(console.error);
   }, 2000);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleEscape);
-  window.removeEventListener('mousemove', onGlobalMouseMove);
-  window.removeEventListener('mouseup', onGlobalMouseUp);
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
 });
 
 function handleEscape(event: KeyboardEvent) {
@@ -64,6 +61,11 @@ function handleEscape(event: KeyboardEvent) {
 }
 
 function onMouseEnter() {
+  // Cancel any pending hide
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
   if (!isDragging) {
     invoke('slide_side_button_show', { id: buttonId.value }).catch(console.error);
   }
@@ -71,7 +73,14 @@ function onMouseEnter() {
 
 function onMouseLeave() {
   if (!isDragging) {
-    invoke('slide_side_button_hide', { id: buttonId.value }).catch(console.error);
+    // Debounce hide — wait 500ms before sliding away
+    if (hideTimer !== null) {
+      clearTimeout(hideTimer);
+    }
+    hideTimer = window.setTimeout(() => {
+      hideTimer = null;
+      invoke('slide_side_button_hide', { id: buttonId.value }).catch(console.error);
+    }, 500);
   }
 }
 
@@ -81,38 +90,27 @@ async function onContainerMouseDown(event: MouseEvent) {
   if ((event.target as HTMLElement).closest('.side-button')) return;
 
   isDragging = true;
-  dragStartX = event.screenX;
-  dragStartY = event.screenY;
 
-  try {
-    const win = getCurrentWindow();
-    const pos = await win.outerPosition();
-    windowStartX = pos.x;
-    windowStartY = pos.y;
-  } catch (e) {
-    console.error('Failed to get window position for drag:', e);
-    isDragging = false;
+  // Cancel any pending hide during drag
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
   }
 
   event.preventDefault();
-}
 
-function onGlobalMouseMove(event: MouseEvent) {
-  if (!isDragging) return;
+  // Delegate drag to Rust/GDK — it polls global mouse position natively
+  try {
+    await invoke('start_side_button_drag', {
+      id: buttonId.value,
+      startRootX: Math.round(event.screenX),
+      startRootY: Math.round(event.screenY),
+    });
+  } catch (e) {
+    console.error('Native drag failed:', e);
+  }
 
-  const newX = windowStartX + (event.screenX - dragStartX);
-  const newY = windowStartY + (event.screenY - dragStartY);
-
-  const win = getCurrentWindow();
-  win.setPosition(new PhysicalPosition(newX, newY)).catch(console.error);
-}
-
-function onGlobalMouseUp() {
-  if (!isDragging) return;
   isDragging = false;
-
-  // Tell Rust to update the base position after drag
-  invoke('update_side_button_base', { id: buttonId.value }).catch(console.error);
 }
 
 async function launchApp() {
