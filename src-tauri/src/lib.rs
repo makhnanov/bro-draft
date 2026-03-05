@@ -2695,6 +2695,15 @@ async fn show_side_button(
     // Wait for GTK to settle
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
+    // If we have saved physical coordinates, re-apply them after GTK settling
+    // because WebviewWindowBuilder::position() uses logical coords which drift on HiDPI
+    if let (Some(lx), Some(ly)) = (last_x, last_y) {
+        let _ = webview_window.set_position(tauri::Position::Physical(
+            tauri::PhysicalPosition::new(lx, ly)
+        ));
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+
     // Insert placeholder state, then snap to correct edge position
     SIDE_BUTTON_STATES.lock().unwrap().insert(id.clone(), SideButtonState {
         base_x: 0,
@@ -2959,16 +2968,15 @@ async fn start_side_button_drag(
     let win_start_y = start_pos.y;
 
     // Collect other active button positions for showing/hiding during drag
-    let other_buttons: Vec<(String, i32, i32, i32, i32)> = {
+    let (other_buttons, other_ids): (Vec<(String, i32, i32, i32, i32)>, Vec<String>) = {
         let states = SIDE_BUTTON_STATES.lock().unwrap();
         states.iter()
             .filter(|(k, _)| *k != &id)
             .map(|(k, s)| (
-                format!("side-button-{}", k),
-                s.base_x, s.base_y,
-                s.offset_x, s.offset_y,
+                (format!("side-button-{}", k), s.base_x, s.base_y, s.offset_x, s.offset_y),
+                k.clone(),
             ))
-            .collect()
+            .unzip()
     };
 
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -3031,8 +3039,7 @@ async fn start_side_button_drag(
                 if !mask.contains(gtk::gdk::ModifierType::BUTTON1_MASK) {
                     seat_for_ungrab.ungrab();
                     *drag_ended.borrow_mut() = true;
-                    if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); }
-                    // Don't break — continue for hide animation
+                    // Don't send tx yet — wait for hide animation to complete
                 } else {
                     // Move dragged window
                     let new_x = win_start_x + (mouse_x - start_root_x);
@@ -3072,6 +3079,20 @@ async fn start_side_button_drag(
 
             // End loop when hide animation is complete
             if ended_now && current_p <= 0.0 {
+                // Mark other buttons as hidden so the SHOW/HIDE state machine
+                // doesn't read stale state and corrupt their base positions
+                {
+                    let mut states = SIDE_BUTTON_STATES.lock().unwrap();
+                    for oid in &other_ids {
+                        if let Some(state) = states.get_mut(oid) {
+                            state.is_hidden = true;
+                            state.show_completed = false;
+                            state.animation_id += 1;
+                        }
+                    }
+                }
+                // Now signal async code to proceed with update_side_button_base
+                if let Some(tx) = tx.borrow_mut().take() { let _ = tx.send(()); }
                 return gtk::glib::ControlFlow::Break;
             }
 

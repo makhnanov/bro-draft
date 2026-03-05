@@ -121,7 +121,7 @@ function cancelForm() {
   resetForm();
 }
 
-function saveForm() {
+async function saveForm() {
   if (!formName.value.trim()) {
     alert('Enter a button name');
     return;
@@ -133,11 +133,28 @@ function saveForm() {
 
   if (editingButton.value) {
     // Update existing
+    const edgeChanged = editingButton.value.edge !== formEdge.value;
+    const positionChanged = editingButton.value.position !== formPosition.value;
+    const wasActive = editingButton.value.isActive;
+
     editingButton.value.name = formName.value.trim();
     editingButton.value.iconPath = formIconPath.value;
     editingButton.value.command = formCommand.value.trim();
     editingButton.value.edge = formEdge.value;
     editingButton.value.position = formPosition.value;
+
+    // If edge or position changed, clear saved coordinates so slider value is used
+    if (edgeChanged || positionChanged) {
+      delete editingButton.value.lastX;
+      delete editingButton.value.lastY;
+
+      // Reactivate to apply new position
+      if (wasActive) {
+        const btn = editingButton.value;
+        await deactivateButton(btn);
+        await activateButton(btn);
+      }
+    }
   } else {
     // Create new
     const btn: SideButton = {
